@@ -3,6 +3,10 @@ GRU encoder with three output heads:
   - monophone CTC head       (variant A)
   - standard diphone head    (variants B/C/D/E)
   - skip-diphone aux head    (variants D/E)
+
+Two encoder implementations are provided:
+  - GRUCell / BidirectionalGRU: hand-written (active, used by default)
+  - nn.GRU-based encoder:       commented out below for reference
 """
 
 import torch
@@ -10,32 +14,145 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
+# ---------------------------------------------------------------------------
+# Hand-written GRU cell
+# Equations:
+#   z_t = sigmoid(W_z x_t + U_z h_{t-1})          update gate
+#   r_t = sigmoid(W_r x_t + U_r h_{t-1})          reset gate
+#   n_t = tanh(W_n x_t + U_n (r_t * h_{t-1}))    candidate hidden state
+#   h_t = (1 - z_t) * h_{t-1} + z_t * n_t        new hidden state
+# ---------------------------------------------------------------------------
+
+class GRUCell(nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        # Fused input projection for all three gates
+        self.W = nn.Linear(input_dim,  3 * hidden_dim, bias=True)
+        # Separate hidden projections so reset gate can be applied before U_n
+        self.U_zr = nn.Linear(hidden_dim, 2 * hidden_dim, bias=False)
+        self.U_n  = nn.Linear(hidden_dim,     hidden_dim, bias=False)
+
+    def forward(self, x, h):
+        """
+        x: (B, input_dim)
+        h: (B, hidden_dim)
+        returns h_new: (B, hidden_dim)
+        """
+        W_z, W_r, W_n = self.W(x).chunk(3, dim=-1)
+        U_z, U_r      = self.U_zr(h).chunk(2, dim=-1)
+
+        z = torch.sigmoid(W_z + U_z)
+        r = torch.sigmoid(W_r + U_r)
+        n = torch.tanh(W_n + self.U_n(r * h))
+
+        return (1 - z) * h + z * n
+
+
+class BidirectionalGRU(nn.Module):
+    def __init__(self, input_dim, hidden_dim, num_layers, dropout=0.4):
+        super().__init__()
+        self.hidden_dim = hidden_dim
+        self.num_layers = num_layers
+        self.dropout = dropout
+
+        # Stack of forward and backward GRU cells
+        # Input to layer 0 is input_dim; subsequent layers receive 2*hidden_dim
+        self.fwd_cells = nn.ModuleList()
+        self.bwd_cells = nn.ModuleList()
+        for i in range(num_layers):
+            layer_input_dim = input_dim if i == 0 else 2 * hidden_dim
+            self.fwd_cells.append(GRUCell(layer_input_dim, hidden_dim))
+            self.bwd_cells.append(GRUCell(layer_input_dim, hidden_dim))
+
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, lengths):
+        """
+        x:       (B, T, input_dim)
+        lengths: (B,)
+        returns: (B, T, 2 * hidden_dim)
+        """
+        B, T, _ = x.shape
+
+        out = x
+        for layer in range(self.num_layers):
+            h_fwd = torch.zeros(B, self.hidden_dim, device=x.device)
+            h_bwd = torch.zeros(B, self.hidden_dim, device=x.device)
+
+            fwd_outs = []
+            for t in range(T):
+                h_fwd = self.fwd_cells[layer](out[:, t, :], h_fwd)
+                fwd_outs.append(h_fwd)
+
+            bwd_outs = []
+            for t in range(T - 1, -1, -1):
+                h_bwd = self.bwd_cells[layer](out[:, t, :], h_bwd)
+                bwd_outs.append(h_bwd)
+            bwd_outs = list(reversed(bwd_outs))
+
+            fwd_tensor = torch.stack(fwd_outs, dim=1)   # (B, T, H)
+            bwd_tensor = torch.stack(bwd_outs, dim=1)   # (B, T, H)
+            out = torch.cat([fwd_tensor, bwd_tensor], dim=-1)  # (B, T, 2H)
+
+            if layer < self.num_layers - 1:
+                out = self.drop(out)
+
+        # Zero out positions beyond each sequence's true length
+        mask = torch.arange(T, device=x.device).unsqueeze(0) >= lengths.unsqueeze(1)
+        out[mask] = 0.0
+
+        return out
+
+
+# ---------------------------------------------------------------------------
+# PyTorch built-in alternative (uncomment to swap in, comment out the
+# BidirectionalGRU block in SkipDiphoneDecoder.__init__ and forward)
+# ---------------------------------------------------------------------------
+# class TorchGRUEncoder(nn.Module):
+#     def __init__(self, input_dim, hidden_dim, num_layers, dropout=0.4):
+#         super().__init__()
+#         self.gru = nn.GRU(
+#             input_size=input_dim,
+#             hidden_size=hidden_dim,
+#             num_layers=num_layers,
+#             batch_first=True,
+#             dropout=dropout if num_layers > 1 else 0.0,
+#             bidirectional=True,
+#         )
+#
+#     def forward(self, x, lengths):
+#         packed = nn.utils.rnn.pack_padded_sequence(
+#             x, lengths.cpu(), batch_first=True, enforce_sorted=False
+#         )
+#         out, _ = self.gru(packed)
+#         out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
+#         return out   # (B, T, 2 * hidden_dim)
+# ---------------------------------------------------------------------------
+
+
 class SkipDiphoneDecoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers, num_phonemes,
-                 num_diphones, dropout=0.4, bidirectional=True):
+                 num_diphones, dropout=0.4):
         super().__init__()
         self.num_phonemes = num_phonemes
         self.num_diphones = num_diphones
 
-        self.encoder = nn.GRU(
-            input_size=input_dim,
-            hidden_size=hidden_dim,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=dropout if num_layers > 1 else 0.0,
-            bidirectional=bidirectional,
-        )
+        # Hand-written bidirectional GRU encoder
+        self.encoder = BidirectionalGRU(input_dim, hidden_dim, num_layers, dropout)
 
-        enc_out_dim = hidden_dim * (2 if bidirectional else 1)
+        # Swap the two lines above with the following to use nn.GRU instead:
+        # self.encoder = TorchGRUEncoder(input_dim, hidden_dim, num_layers, dropout)
+
+        enc_out_dim = 2 * hidden_dim  # bidirectional
 
         # Head A: monophone CTC (baseline)
-        self.mono_head = nn.Linear(enc_out_dim, num_phonemes + 1)   # +1 for CTC blank
+        self.mono_head    = nn.Linear(enc_out_dim, num_phonemes + 1)  # +1 for CTC blank
 
-        # Head B/C/D/E: standard diphone (z_{t-1} -> z_t)
+        # Head B/C/D/E: standard diphone CTC (z_{t-1} -> z_t)
         self.diphone_head = nn.Linear(enc_out_dim, num_diphones + 1)
 
-        # Head D/E: skip-diphone auxiliary (z_{t-2} -> z_t)
-        self.skip_head = nn.Linear(enc_out_dim, num_diphones + 1)
+        # Head D/E: skip-diphone auxiliary CTC (z_{t-2} -> z_t)
+        self.skip_head    = nn.Linear(enc_out_dim, num_diphones + 1)
 
     def forward(self, x, lengths):
         """
@@ -43,20 +160,16 @@ class SkipDiphoneDecoder(nn.Module):
             x:       (B, T, input_dim)
             lengths: (B,) actual sequence lengths before padding
         Returns:
-            mono_log_probs:   (T, B, num_phonemes+1)
-            diphone_log_probs:(T, B, num_diphones+1)
-            skip_log_probs:   (T, B, num_diphones+1)
-            phoneme_probs:    (B, T, num_phonemes)  -- marginalized from diphone
+            mono_log_probs:    (T, B, num_phonemes+1)
+            diphone_log_probs: (T, B, num_diphones+1)
+            skip_log_probs:    (T, B, num_diphones+1)
+            phoneme_probs:     (B, T, num_phonemes)  -- marginalized from diphone
         """
-        packed = nn.utils.rnn.pack_padded_sequence(
-            x, lengths.cpu(), batch_first=True, enforce_sorted=False
-        )
-        enc_out, _ = self.encoder(packed)
-        enc_out, _ = nn.utils.rnn.pad_packed_sequence(enc_out, batch_first=True)
+        enc_out = self.encoder(x, lengths)                    # (B, T, 2H)
 
-        mono_log_probs   = F.log_softmax(self.mono_head(enc_out),   dim=-1).permute(1, 0, 2)
+        mono_log_probs    = F.log_softmax(self.mono_head(enc_out),    dim=-1).permute(1, 0, 2)
         diphone_log_probs = F.log_softmax(self.diphone_head(enc_out), dim=-1).permute(1, 0, 2)
-        skip_log_probs   = F.log_softmax(self.skip_head(enc_out),   dim=-1).permute(1, 0, 2)
+        skip_log_probs    = F.log_softmax(self.skip_head(enc_out),    dim=-1).permute(1, 0, 2)
 
         phoneme_probs = self._marginalize(diphone_log_probs.permute(1, 0, 2))
 
@@ -64,16 +177,15 @@ class SkipDiphoneDecoder(nn.Module):
 
     def _marginalize(self, diphone_log_probs):
         """
-        Sum over the previous-phoneme dimension to recover per-frame phoneme probs.
+        Recover per-frame phoneme probs by summing over the previous-phoneme dim.
         diphone class index = prev_phoneme * num_phonemes + curr_phoneme
-        Shape: (B, T, num_diphones+1) -> (B, T, num_phonemes)
+        (B, T, num_diphones+1) -> (B, T, num_phonemes)
         """
         B, T, _ = diphone_log_probs.shape
         C = self.num_phonemes
 
-        # Exclude the blank class (last index) before marginalizing
-        diphone_probs = diphone_log_probs[..., :-1].exp()                 # (B, T, C*C)
-        diphone_probs = diphone_probs.view(B, T, C, C)                    # (B, T, prev, curr)
-        phoneme_probs = diphone_probs.sum(dim=2)                          # (B, T, curr)
+        diphone_probs = diphone_log_probs[..., :-1].exp()      # drop blank, (B, T, C*C)
+        diphone_probs = diphone_probs.view(B, T, C, C)         # (B, T, prev, curr)
+        phoneme_probs = diphone_probs.sum(dim=2)               # (B, T, curr)
         phoneme_probs = phoneme_probs / (phoneme_probs.sum(dim=-1, keepdim=True) + 1e-8)
         return phoneme_probs
