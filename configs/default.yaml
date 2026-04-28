@@ -1,0 +1,35 @@
+# Model
+encoder:
+  input_dim: 256          # neural feature dimension (threshold crossings + spike-band power)
+  hidden_dim: 512
+  num_layers: 5
+  dropout: 0.4
+  bidirectional: true
+
+# Classes
+num_phonemes: 40          # CMU phoneme set size
+num_diphones: 1600        # 40 * 40
+
+# Loss weights  (Eq. 1 in proposal)
+alpha: 0.6                # weight for standard diphone CTC loss
+beta: 0.1                 # weight for skip-diphone auxiliary CTC loss (small by design)
+lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-3, 5e-3, 1e-2]
+
+# Training
+variant: "E"              # ablation variant: A | B | C | D | E
+batch_size: 32
+num_epochs: 50
+learning_rate: 1.0e-3
+lr_schedule: cosine
+grad_clip: 1.0
+seed: 42
+
+# Data
+data_dir: "data/competitionData"
+lm_dir: "data/languageModel"
+derived_dir: "data/derived"
+debug_subset: false        # set true to use a single session for fast debugging
+
+# Logging
+log_dir: "experiments"
+save_every: 5             # checkpoint every N epochs

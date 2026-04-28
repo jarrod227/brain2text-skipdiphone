@@ -1,0 +1,86 @@
+"""
+Training objective (Eq. 1 from proposal):
+
+  L_total = L_CTC_phoneme
+          + alpha  * L_CTC_std_diphone
+          + beta   * L_CTC_skip_diphone
+          + lambda * L_smooth
+
+  L_smooth = (1 / T-1) * sum_{t=2}^{T} || p_t - p_{t-1} ||_2^2
+"""
+
+import torch
+import torch.nn as nn
+
+
+ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
+
+
+def smoothness_loss(phoneme_probs, lengths):
+    """
+    Args:
+        phoneme_probs: (B, T, num_phonemes)
+        lengths:       (B,) actual sequence lengths
+    Returns:
+        scalar mean smoothness loss
+    """
+    diff = phoneme_probs[:, 1:, :] - phoneme_probs[:, :-1, :]   # (B, T-1, C)
+    sq   = (diff ** 2).sum(dim=-1)                                # (B, T-1)
+
+    total, count = 0.0, 0
+    for i, L in enumerate(lengths):
+        if L > 1:
+            total += sq[i, : L - 1].mean()
+            count += 1
+
+    return total / max(count, 1)
+
+
+def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
+                 phoneme_probs, targets, input_lengths, target_lengths,
+                 alpha, beta, lambda_smooth, variant):
+    """
+    Args:
+        mono_log_probs:    (T, B, num_phonemes+1)
+        diphone_log_probs: (T, B, num_diphones+1)
+        skip_log_probs:    (T, B, num_diphones+1)
+        phoneme_probs:     (B, T, num_phonemes)
+        targets:           dict with keys 'mono', 'diphone', 'skip_diphone'
+        input_lengths:     (B,)
+        target_lengths:    dict with keys matching targets
+        alpha, beta, lambda_smooth: loss weights
+        variant:           one of 'A', 'B', 'C', 'D', 'E'
+
+    Returns:
+        total loss (scalar), dict of component losses for logging
+    """
+    components = {}
+
+    if variant == "A":
+        l_mono = ctc_loss_fn(mono_log_probs, targets["mono"],
+                             input_lengths, target_lengths["mono"])
+        components["ctc_mono"] = l_mono
+        return l_mono, components
+
+    # Variants B / C / D / E all use the diphone CTC as main objective
+    l_mono = ctc_loss_fn(mono_log_probs, targets["mono"],
+                         input_lengths, target_lengths["mono"])
+    l_diphone = ctc_loss_fn(diphone_log_probs, targets["diphone"],
+                            input_lengths, target_lengths["diphone"])
+
+    total = l_mono + alpha * l_diphone
+    components["ctc_mono"]   = l_mono
+    components["ctc_diphone"] = l_diphone
+
+    if variant in ("D", "E"):
+        l_skip = ctc_loss_fn(skip_log_probs, targets["skip_diphone"],
+                             input_lengths, target_lengths["skip_diphone"])
+        total += beta * l_skip
+        components["ctc_skip"] = l_skip
+
+    if variant in ("C", "E"):
+        l_smooth = smoothness_loss(phoneme_probs, input_lengths)
+        total += lambda_smooth * l_smooth
+        components["smooth"] = l_smooth
+
+    return total, components

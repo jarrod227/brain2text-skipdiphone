@@ -1,0 +1,32 @@
+# Data (download separately from Dryad)
+data/competitionData/
+data/languageModel/
+data/derived/
+
+# Experiment outputs
+experiments/*/
+!experiments/.gitkeep
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Env
+.env
+venv/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
