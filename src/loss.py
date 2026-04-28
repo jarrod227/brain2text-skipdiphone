@@ -13,9 +13,6 @@ import torch
 import torch.nn as nn
 
 
-ctc_loss_fn = nn.CTCLoss(blank=0, zero_infinity=True)
-
-
 def smoothness_loss(phoneme_probs, lengths):
     """
     Args:
@@ -38,7 +35,7 @@ def smoothness_loss(phoneme_probs, lengths):
 
 def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
                  phoneme_probs, targets, input_lengths, target_lengths,
-                 alpha, beta, lambda_smooth, variant):
+                 alpha, beta, lambda_smooth, variant, num_phonemes, num_diphones):
     """
     Args:
         mono_log_probs:    (T, B, num_phonemes+1)
@@ -54,27 +51,33 @@ def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
     Returns:
         total loss (scalar), dict of component losses for logging
     """
+    # blank is placed at the last index of each head's output
+    # mono:   indices 0–(num_phonemes-1) are phonemes, num_phonemes is blank
+    # diphone/skip: indices 0–(num_diphones-1) are diphones, num_diphones is blank
+    ctc_mono = nn.CTCLoss(blank=num_phonemes,  zero_infinity=True)
+    ctc_dip  = nn.CTCLoss(blank=num_diphones,  zero_infinity=True)
+
     components = {}
 
     if variant == "A":
-        l_mono = ctc_loss_fn(mono_log_probs, targets["mono"],
-                             input_lengths, target_lengths["mono"])
+        l_mono = ctc_mono(mono_log_probs, targets["mono"],
+                          input_lengths, target_lengths["mono"])
         components["ctc_mono"] = l_mono
         return l_mono, components
 
     # Variants B / C / D / E all use the diphone CTC as main objective
-    l_mono = ctc_loss_fn(mono_log_probs, targets["mono"],
+    l_mono    = ctc_mono(mono_log_probs, targets["mono"],
                          input_lengths, target_lengths["mono"])
-    l_diphone = ctc_loss_fn(diphone_log_probs, targets["diphone"],
-                            input_lengths, target_lengths["diphone"])
+    l_diphone = ctc_dip(diphone_log_probs, targets["diphone"],
+                        input_lengths, target_lengths["diphone"])
 
     total = l_mono + alpha * l_diphone
-    components["ctc_mono"]   = l_mono
+    components["ctc_mono"]    = l_mono
     components["ctc_diphone"] = l_diphone
 
     if variant in ("D", "E"):
-        l_skip = ctc_loss_fn(skip_log_probs, targets["skip_diphone"],
-                             input_lengths, target_lengths["skip_diphone"])
+        l_skip = ctc_dip(skip_log_probs, targets["skip_diphone"],
+                         input_lengths, target_lengths["skip_diphone"])
         total += beta * l_skip
         components["ctc_skip"] = l_skip
 
