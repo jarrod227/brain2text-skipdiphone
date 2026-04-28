@@ -88,7 +88,6 @@ def main():
         num_phonemes=cfg.num_phonemes,
         num_diphones=cfg.num_diphones,
         dropout=cfg.encoder.dropout,
-        bidirectional=cfg.encoder.bidirectional,
     ).to(device)
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
