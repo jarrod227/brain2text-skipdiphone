@@ -4,7 +4,6 @@ encoder:
   hidden_dim: 512
   num_layers: 5
   dropout: 0.4
-  bidirectional: true
 
 # Classes
 num_phonemes: 40          # CMU phoneme set size
