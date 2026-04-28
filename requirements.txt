@@ -7,3 +7,5 @@ editdistance>=0.6.3      # for PER/WER computation
 omegaconf>=2.3.0         # YAML config loading
 tqdm>=4.65.0
 pyyaml>=6.0
+matplotlib>=3.7.0
+pandas>=2.0.0
