@@ -50,6 +50,7 @@ def train_epoch(model, loader, optimizer, cfg, variant, lambda_smooth, device):
             mono_lp, dip_lp, skip_lp, phone_p,
             targets, lengths, tlens,
             cfg.alpha, cfg.beta, lambda_smooth, variant,
+            cfg.num_phonemes, cfg.num_diphones,
         )
 
         optimizer.zero_grad()
@@ -75,6 +76,7 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
             mono_lp, dip_lp, skip_lp, phone_p,
             targets, lengths, tlens,
             cfg.alpha, cfg.beta, lambda_smooth, variant,
+            cfg.num_phonemes, cfg.num_diphones,
         )
         total_loss += loss.item()
     return total_loss / len(loader)
@@ -109,7 +111,6 @@ def main():
         num_phonemes=cfg.num_phonemes,
         num_diphones=cfg.num_diphones,
         dropout=cfg.encoder.dropout,
-        bidirectional=cfg.encoder.bidirectional,
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
