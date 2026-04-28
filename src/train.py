@@ -8,6 +8,7 @@ Usage:
 
 import argparse
 import glob
+import json
 import os
 import random
 from pathlib import Path
@@ -121,6 +122,7 @@ def main():
     save_dir.mkdir(parents=True, exist_ok=True)
 
     best_val = float("inf")
+    log = []
     for epoch in range(1, cfg.num_epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, cfg,
                                  variant, lambda_smooth, device)
@@ -128,6 +130,9 @@ def main():
         scheduler.step()
 
         print(f"Epoch {epoch:03d} | train {train_loss:.4f} | val {val_loss:.4f}")
+
+        log.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
+        (save_dir / "loss.json").write_text(json.dumps(log, indent=2))
 
         if val_loss < best_val:
             best_val = val_loss
