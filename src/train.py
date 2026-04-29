@@ -38,17 +38,18 @@ def train_epoch(model, loader, optimizer, cfg, variant, lambda_smooth, device):
     model.train()
     total_loss = 0.0
     for batch in tqdm(loader, leave=False, desc="train"):
-        neural  = batch["neural"].to(device)
-        lengths = batch["lengths"].to(device)
+        neural   = batch["neural"].to(device)
+        lengths  = batch["lengths"].to(device)
+        day_ids  = batch["day_ids"].to(device)
 
-        mono_lp, dip_lp, skip_lp, phone_p = model(neural, lengths)
+        mono_lp, dip_lp, skip_lp, phone_p, enc_lengths = model(neural, lengths, day_ids)
 
         targets = {k: v.to(device) for k, v in batch["targets"].items()}
         tlens   = {k: v.to(device) for k, v in batch["target_lengths"].items()}
 
         loss, _ = compute_loss(
             mono_lp, dip_lp, skip_lp, phone_p,
-            targets, lengths, tlens,
+            targets, enc_lengths, tlens,
             cfg.alpha, cfg.beta, lambda_smooth, variant,
             cfg.num_phonemes, cfg.num_diphones,
         )
@@ -67,14 +68,15 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
     model.eval()
     total_loss = 0.0
     for batch in loader:
-        neural  = batch["neural"].to(device)
-        lengths = batch["lengths"].to(device)
-        mono_lp, dip_lp, skip_lp, phone_p = model(neural, lengths)
+        neural   = batch["neural"].to(device)
+        lengths  = batch["lengths"].to(device)
+        day_ids  = batch["day_ids"].to(device)
+        mono_lp, dip_lp, skip_lp, phone_p, enc_lengths = model(neural, lengths, day_ids)
         targets = {k: v.to(device) for k, v in batch["targets"].items()}
         tlens   = {k: v.to(device) for k, v in batch["target_lengths"].items()}
         loss, _ = compute_loss(
             mono_lp, dip_lp, skip_lp, phone_p,
-            targets, lengths, tlens,
+            targets, enc_lengths, tlens,
             cfg.alpha, cfg.beta, lambda_smooth, variant,
             cfg.num_phonemes, cfg.num_diphones,
         )
@@ -110,6 +112,10 @@ def main():
         num_layers=cfg.encoder.num_layers,
         num_phonemes=cfg.num_phonemes,
         num_diphones=cfg.num_diphones,
+        num_days=cfg.num_days,
+        kernel_len=cfg.encoder.kernel_len,
+        stride_len=cfg.encoder.stride_len,
+        gaussian_smooth_width=cfg.encoder.gaussian_smooth_width,
         dropout=cfg.encoder.dropout,
     ).to(device)
 
