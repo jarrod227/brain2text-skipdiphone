@@ -1,9 +1,11 @@
 """
 Loads Brain-to-Text '24 data from TFRecords (via TensorFlow) and wraps
 them in a PyTorch Dataset / DataLoader.
+
+Each TFRecord file corresponds to one recording session (day).
+The day_id is derived from the file's index in the sorted file list.
 """
 
-import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
@@ -24,20 +26,22 @@ class BrainToTextDataset(Dataset):
         }
 
         samples = []
-        for path in paths:
+        # Each file = one recording day; file index becomes the day_id
+        for day_id, path in enumerate(paths):
             raw_ds = tf.data.TFRecordDataset(path)
             for raw in raw_ds:
-                ex = tf.io.parse_single_example(raw, feature_spec)
-                feat_dim  = int(ex["neuralFeatureSize"].numpy())
-                neural    = ex["neuralFeatures"].numpy().reshape(-1, feat_dim)
-                phones    = ex["phoneSeq"].numpy().tolist()
+                ex       = tf.io.parse_single_example(raw, feature_spec)
+                feat_dim = int(ex["neuralFeatureSize"].numpy())
+                neural   = ex["neuralFeatures"].numpy().reshape(-1, feat_dim)
+                phones   = ex["phoneSeq"].numpy().tolist()
                 diphones  = self._phones_to_diphones(phones)
                 skip_dip  = self._phones_to_skip_diphones(phones)
                 samples.append({
-                    "neural":       torch.tensor(neural, dtype=torch.float32),
-                    "mono":         torch.tensor(phones,   dtype=torch.long),
-                    "diphone":      torch.tensor(diphones, dtype=torch.long),
-                    "skip_diphone": torch.tensor(skip_dip, dtype=torch.long),
+                    "neural":       torch.tensor(neural,    dtype=torch.float32),
+                    "day_id":       day_id,
+                    "mono":         torch.tensor(phones,    dtype=torch.long),
+                    "diphone":      torch.tensor(diphones,  dtype=torch.long),
+                    "skip_diphone": torch.tensor(skip_dip,  dtype=torch.long),
                 })
                 if debug_subset and len(samples) >= 200:
                     return samples
@@ -67,7 +71,8 @@ def collate_fn(batch):
     skip_dip = [s["skip_diphone"] for s in batch]
 
     neural_padded = pad_sequence(neural, batch_first=True)
-    lengths = torch.tensor([n.shape[0] for n in neural], dtype=torch.long)
+    lengths  = torch.tensor([n.shape[0] for n in neural], dtype=torch.long)
+    day_ids  = torch.tensor([s["day_id"] for s in batch], dtype=torch.long)
 
     mono_cat    = torch.cat(mono)
     diphone_cat = torch.cat(diphone)
@@ -78,8 +83,9 @@ def collate_fn(batch):
     skip_lens    = torch.tensor([len(t) for t in skip_dip], dtype=torch.long)
 
     return {
-        "neural":         neural_padded,
-        "lengths":        lengths,
+        "neural":   neural_padded,
+        "lengths":  lengths,
+        "day_ids":  day_ids,
         "targets": {
             "mono":         mono_cat,
             "diphone":      diphone_cat,
