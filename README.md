@@ -1,6 +1,6 @@
 # Brain-to-Text: Skip-Diphone Auxiliary Supervision and Temporal Smoothness Regularization
 
-This project extends the [DCoND](https://arxiv.org/abs/2411.10657) framework for neural speech decoding with two additions:
+This repository contains the implementation for a course project that proposes to extend the [DCoND](https://arxiv.org/abs/2411.10657) framework for neural speech decoding with two additions:
 (i) a **skip-diphone auxiliary head** predicting z_{t-2}→z_t context pairs, and
 (ii) a **temporal smoothness loss** on marginalized phoneme probabilities.
 
@@ -40,16 +40,17 @@ Five ablation variants are studied:
 Install in this order:
 
 ```bash
-# 1. Clone and install upstream speechBCI (provides GRU encoder, data utilities)
-git clone https://github.com/fwillett/speechBCI.git
-pip install -e speechBCI/NeuralDecoder
+# 1. Clone and install the PyTorch DCoND baseline (reference architecture)
+git clone https://github.com/cffan/neural_seq_decoder.git
+pip install -e neural_seq_decoder
 
 # 2. Install this project's dependencies
 pip install -r requirements.txt
-```
 
-For the language model decoder (KenLM-based), follow the instructions in
-`speechBCI/LanguageModelDecoder/README.md` after step 1.
+# 3. (Optional) Install language model decoder for n-gram rescoring
+git clone https://github.com/fwillett/speechBCI.git
+# Follow speechBCI/LanguageModelDecoder/README.md to compile and install KenLM
+```
 
 ---
 
