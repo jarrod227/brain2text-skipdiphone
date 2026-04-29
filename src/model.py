@@ -4,14 +4,117 @@ GRU encoder with three output heads:
   - standard diphone head    (variants B/C/D/E)
   - skip-diphone aux head    (variants D/E)
 
+Input preprocessing pipeline (matching cffan/neural_seq_decoder):
+  raw neural features
+    -> GaussianSmoothing1D
+    -> day-specific linear transform + Softsign
+    -> sliding window (nn.Unfold, kernel=32, stride=4)
+    -> hand-written bidirectional GRU
+
 Two encoder implementations are provided:
   - GRUCell / BidirectionalGRU: hand-written (active, used by default)
   - nn.GRU-based encoder:       commented out below for reference
 """
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+
+# ---------------------------------------------------------------------------
+# Input preprocessing
+# ---------------------------------------------------------------------------
+
+class GaussianSmoothing1D(nn.Module):
+    """Fixed depthwise conv1d with a Gaussian kernel along the time axis."""
+
+    def __init__(self, num_channels, kernel_size=20, sigma=2.0):
+        super().__init__()
+        # Build 1-D Gaussian kernel
+        half = (kernel_size - 1) / 2.0
+        x = torch.arange(-half, half + 1)
+        kernel = torch.exp(-0.5 * (x / sigma) ** 2)
+        kernel = kernel / kernel.sum()
+        # Shape: (num_channels, 1, kernel_size) for depthwise conv1d
+        weight = kernel.view(1, 1, -1).repeat(num_channels, 1, 1)
+        self.register_buffer("weight", weight)
+        self.num_channels = num_channels
+        self.padding = kernel_size // 2
+
+    def forward(self, x):
+        # x: (B, D, T)  — channel-first
+        return F.conv1d(x, self.weight, padding=self.padding,
+                        groups=self.num_channels)
+
+
+class InputPreprocessor(nn.Module):
+    """
+    Gaussian smooth -> day-specific affine transform + Softsign
+    -> sliding-window unfold.
+
+    Matches the preprocessing in cffan/neural_seq_decoder GRUDecoder.
+    Day weights are initialized as identity so the model starts at the
+    same point regardless of how many recording days are in the dataset.
+    """
+
+    def __init__(self, input_dim, num_days, kernel_len=32, stride_len=4,
+                 gaussian_smooth_width=2.0):
+        super().__init__()
+        self.input_dim   = input_dim
+        self.kernel_len  = kernel_len
+        self.stride_len  = stride_len
+
+        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=20,
+                                          sigma=gaussian_smooth_width)
+
+        # Day-specific linear transform: one (D, D) matrix + (1, D) bias per day
+        day_w = torch.zeros(num_days, input_dim, input_dim)
+        for i in range(num_days):
+            day_w[i] = torch.eye(input_dim)          # start as identity
+        self.day_weights = nn.Parameter(day_w)
+        self.day_bias    = nn.Parameter(torch.zeros(num_days, 1, input_dim))
+
+        self.unfolder = nn.Unfold((kernel_len, 1), stride=stride_len)
+
+    @property
+    def output_dim(self):
+        return self.input_dim * self.kernel_len
+
+    def forward(self, x, day_ids, lengths):
+        """
+        x:       (B, T, input_dim)
+        day_ids: (B,)  integer day index per sample
+        lengths: (B,)  true sequence lengths
+        returns:
+            out:     (B, T', input_dim * kernel_len)
+            lengths: (B,)  updated lengths after striding
+        """
+        B, T, D = x.shape
+
+        # Gaussian smoothing — operate channel-first
+        x = x.permute(0, 2, 1)           # (B, D, T)
+        x = self.smooth(x)
+
+        # Day-specific affine transform
+        # day_weights[day_ids]: (B, D, D)
+        x = x.permute(0, 2, 1)           # (B, T, D)
+        w = self.day_weights[day_ids]     # (B, D, D)
+        b = self.day_bias[day_ids]        # (B, 1, D)
+        x = torch.bmm(x, w) + b          # (B, T, D)
+        x = torch.nn.functional.softsign(x)
+
+        # Sliding-window unfold: (B, T, D) -> (B, D*kernel_len, T')
+        x = x.permute(0, 2, 1).unsqueeze(-1)          # (B, D, T, 1)
+        x = self.unfolder(x)                           # (B, D*kernel_len, T')
+        T_prime = x.shape[-1]
+        x = x.permute(0, 2, 1).contiguous()           # (B, T', D*kernel_len)
+
+        # Update lengths to match strided output
+        new_lengths = ((lengths - self.kernel_len) // self.stride_len + 1).clamp(min=1)
+
+        return x, new_lengths
 
 
 # ---------------------------------------------------------------------------
@@ -53,7 +156,6 @@ class BidirectionalGRU(nn.Module):
         super().__init__()
         self.hidden_dim = hidden_dim
         self.num_layers = num_layers
-        self.dropout = dropout
 
         # Stack of forward and backward GRU cells
         # Input to layer 0 is input_dim; subsequent layers receive 2*hidden_dim
@@ -132,16 +234,26 @@ class BidirectionalGRU(nn.Module):
 
 class SkipDiphoneDecoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_layers, num_phonemes,
-                 num_diphones, dropout=0.4):
+                 num_diphones, num_days, kernel_len=32, stride_len=4,
+                 gaussian_smooth_width=2.0, dropout=0.4):
         super().__init__()
         self.num_phonemes = num_phonemes
         self.num_diphones = num_diphones
 
+        self.preprocessor = InputPreprocessor(
+            input_dim, num_days, kernel_len, stride_len, gaussian_smooth_width
+        )
+
         # Hand-written bidirectional GRU encoder
-        self.encoder = BidirectionalGRU(input_dim, hidden_dim, num_layers, dropout)
+        # Input dim after unfold: input_dim * kernel_len
+        self.encoder = BidirectionalGRU(
+            self.preprocessor.output_dim, hidden_dim, num_layers, dropout
+        )
 
         # Swap the two lines above with the following to use nn.GRU instead:
-        # self.encoder = TorchGRUEncoder(input_dim, hidden_dim, num_layers, dropout)
+        # self.encoder = TorchGRUEncoder(
+        #     self.preprocessor.output_dim, hidden_dim, num_layers, dropout
+        # )
 
         enc_out_dim = 2 * hidden_dim  # bidirectional
 
@@ -154,18 +266,21 @@ class SkipDiphoneDecoder(nn.Module):
         # Head D/E: skip-diphone auxiliary CTC (z_{t-2} -> z_t)
         self.skip_head    = nn.Linear(enc_out_dim, num_diphones + 1)
 
-    def forward(self, x, lengths):
+    def forward(self, x, lengths, day_ids):
         """
         Args:
             x:       (B, T, input_dim)
             lengths: (B,) actual sequence lengths before padding
+            day_ids: (B,) integer recording-day index per sample
         Returns:
-            mono_log_probs:    (T, B, num_phonemes+1)
-            diphone_log_probs: (T, B, num_diphones+1)
-            skip_log_probs:    (T, B, num_diphones+1)
-            phoneme_probs:     (B, T, num_phonemes)  -- marginalized from diphone
+            mono_log_probs:    (T', B, num_phonemes+1)
+            diphone_log_probs: (T', B, num_diphones+1)
+            skip_log_probs:    (T', B, num_diphones+1)
+            phoneme_probs:     (B, T', num_phonemes)  -- marginalized from diphone
+            enc_lengths:       (B,)  sequence lengths after preprocessing stride
         """
-        enc_out = self.encoder(x, lengths)                    # (B, T, 2H)
+        x, enc_lengths = self.preprocessor(x, day_ids, lengths)   # (B, T', D*K)
+        enc_out = self.encoder(x, enc_lengths)                     # (B, T', 2H)
 
         mono_log_probs    = F.log_softmax(self.mono_head(enc_out),    dim=-1).permute(1, 0, 2)
         diphone_log_probs = F.log_softmax(self.diphone_head(enc_out), dim=-1).permute(1, 0, 2)
@@ -173,13 +288,13 @@ class SkipDiphoneDecoder(nn.Module):
 
         phoneme_probs = self._marginalize(diphone_log_probs.permute(1, 0, 2))
 
-        return mono_log_probs, diphone_log_probs, skip_log_probs, phoneme_probs
+        return mono_log_probs, diphone_log_probs, skip_log_probs, phoneme_probs, enc_lengths
 
     def _marginalize(self, diphone_log_probs):
         """
         Recover per-frame phoneme probs by summing over the previous-phoneme dim.
         diphone class index = prev_phoneme * num_phonemes + curr_phoneme
-        (B, T, num_diphones+1) -> (B, T, num_phonemes)
+        (B, T', num_diphones+1) -> (B, T', num_phonemes)
         """
         B, T, _ = diphone_log_probs.shape
         C = self.num_phonemes
