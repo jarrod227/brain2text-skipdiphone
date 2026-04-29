@@ -1,13 +1,17 @@
 # Model
 encoder:
-  input_dim: 256          # neural feature dimension (threshold crossings + spike-band power)
-  hidden_dim: 512
+  input_dim: 256                 # raw neural feature dimension
+  hidden_dim: 1024               # matches cffan/neural_seq_decoder
   num_layers: 5
   dropout: 0.4
+  kernel_len: 32                 # sliding-window size (unfold)
+  stride_len: 4                  # sliding-window stride
+  gaussian_smooth_width: 2.0     # sigma for input Gaussian smoothing
 
 # Classes
 num_phonemes: 40          # CMU phoneme set size
 num_diphones: 1600        # 40 * 40
+num_days: 50              # number of recording sessions in the dataset
 
 # Loss weights  (Eq. 1 in proposal)
 alpha: 0.6                # weight for standard diphone CTC loss
@@ -16,9 +20,9 @@ lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-3, 5e-3, 1
 
 # Training
 variant: "E"              # ablation variant: A | B | C | D | E
-batch_size: 32
+batch_size: 64
 num_epochs: 50
-learning_rate: 1.0e-3
+learning_rate: 0.02
 lr_schedule: cosine
 grad_clip: 1.0
 seed: 42
