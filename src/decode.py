@@ -43,10 +43,11 @@ def decode(model, loader, lm, device):
     per_scores, wer_scores = [], []
 
     for batch in loader:
-        neural  = batch["neural"].to(device)
-        lengths = batch["lengths"].to(device)
+        neural   = batch["neural"].to(device)
+        lengths  = batch["lengths"].to(device)
+        day_ids  = batch["day_ids"].to(device)
 
-        _, _, _, phoneme_probs = model(neural, lengths)
+        _, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
 
         # phoneme_probs: (B, T, num_phonemes) -> greedy decode per frame
         hyp_phones = phoneme_probs.argmax(dim=-1).cpu().tolist()
@@ -55,7 +56,7 @@ def decode(model, loader, lm, device):
         ref_lens   = batch["target_lengths"]["mono"].cpu().tolist()
 
         offset = 0
-        for i, L in enumerate(lengths.cpu().tolist()):
+        for i, L in enumerate(enc_lengths.cpu().tolist()):
             ref_seq = ref_phones[offset: offset + ref_lens[i]]
             hyp_seq = hyp_phones[i][:L]
             per_scores.append(phoneme_error_rate(hyp_seq, ref_seq))
@@ -87,6 +88,10 @@ def main():
         num_layers=cfg.encoder.num_layers,
         num_phonemes=cfg.num_phonemes,
         num_diphones=cfg.num_diphones,
+        num_days=cfg.num_days,
+        kernel_len=cfg.encoder.kernel_len,
+        stride_len=cfg.encoder.stride_len,
+        gaussian_smooth_width=cfg.encoder.gaussian_smooth_width,
         dropout=cfg.encoder.dropout,
     ).to(device)
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
