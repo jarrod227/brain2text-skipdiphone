@@ -1,9 +1,12 @@
 """
-Decode a trained checkpoint and report PER / WER using the n-gram LM.
+Decode a trained checkpoint and report PER / WER.
 
 Usage:
+    # PER only (no LM needed)
+    python src/decode.py --checkpoint experiments/<run>/best.pt
+
+    # PER + WER with n-gram LM (requires speechBCI LanguageModelDecoder)
     python src/decode.py --checkpoint experiments/<run>/best.pt --lm 3gram
-    python src/decode.py --checkpoint experiments/<run>/best.pt --lm 5gram
 """
 
 import argparse
@@ -18,15 +21,6 @@ from dataset import make_dataloader
 from model import SkipDiphoneDecoder
 
 
-def load_lm(lm_dir, lm_type):
-    """Returns a callable that takes a list of phoneme sequences and returns word sequences."""
-    # Placeholder: integrate speechBCI's LanguageModelDecoder here.
-    # The decoder expects phoneme-level beam search output and returns word strings.
-    raise NotImplementedError(
-        f"Wire up speechBCI LanguageModelDecoder for '{lm_type}' LM in {lm_dir}"
-    )
-
-
 def phoneme_error_rate(hyp, ref):
     return editdistance.eval(hyp, ref) / max(len(ref), 1)
 
@@ -38,7 +32,7 @@ def word_error_rate(hyp_words, ref_words):
 
 
 @torch.no_grad()
-def decode(model, loader, lm, device):
+def decode(model, loader, device, lm=None):
     model.eval()
     per_scores, wer_scores = [], []
 
@@ -49,7 +43,7 @@ def decode(model, loader, lm, device):
 
         _, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
 
-        # phoneme_probs: (B, T, num_phonemes) -> greedy decode per frame
+        # Greedy decode: argmax over phoneme dimension per frame
         hyp_phones = phoneme_probs.argmax(dim=-1).cpu().tolist()
 
         ref_phones = batch["targets"]["mono"].cpu().tolist()
@@ -62,10 +56,11 @@ def decode(model, loader, lm, device):
             per_scores.append(phoneme_error_rate(hyp_seq, ref_seq))
             offset += ref_lens[i]
 
-        # LM decoding for WER (requires LanguageModelDecoder integration)
-        # hyp_words = lm(phoneme_probs)
-        # for hyp, ref in zip(hyp_words, batch["transcripts"]):
-        #     wer_scores.append(word_error_rate(hyp, ref))
+        # LM decoding for WER (requires speechBCI LanguageModelDecoder)
+        # if lm is not None:
+        #     hyp_words = lm(phoneme_probs)
+        #     for hyp, ref in zip(hyp_words, batch["transcripts"]):
+        #         wer_scores.append(word_error_rate(hyp, ref))
 
     mean_per = sum(per_scores) / len(per_scores) if per_scores else float("nan")
     mean_wer = sum(wer_scores) / len(wer_scores) if wer_scores else float("nan")
@@ -75,8 +70,9 @@ def decode(model, loader, lm, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--lm",         default="3gram", choices=["3gram", "5gram"])
-    parser.add_argument("--config",     default="configs/default.yaml")
+    parser.add_argument("--lm",    default=None, choices=["3gram", "5gram"],
+                        help="n-gram LM for WER (optional; requires speechBCI LM decoder)")
+    parser.add_argument("--config", default="configs/default.yaml")
     args = parser.parse_args()
 
     cfg    = OmegaConf.load(args.config)
@@ -99,9 +95,10 @@ def main():
     test_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "test", "*.pkl")))
     loader = make_dataloader(test_paths, cfg.batch_size, shuffle=False)
 
-    lm = load_lm(cfg.lm_dir, args.lm)
-    per, wer = decode(model, loader, lm, device)
-    print(f"PER: {per * 100:.2f}%   WER: {wer * 100:.2f}%")
+    per, wer = decode(model, loader, device, lm=args.lm)
+    print(f"PER: {per * 100:.2f}%")
+    if args.lm is not None:
+        print(f"WER: {wer * 100:.2f}%")
 
 
 if __name__ == "__main__":
