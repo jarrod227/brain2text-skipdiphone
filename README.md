@@ -40,14 +40,18 @@ Five ablation variants are studied:
 Install in this order:
 
 ```bash
-# 1. Clone and install the PyTorch DCoND baseline (reference architecture)
+# 1. Install PyTorch with CUDA support (adjust cu118 to match your CUDA version)
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+# See https://pytorch.org/get-started/locally/ for the right command
+
+# 2. Clone and install the PyTorch DCoND baseline (reference architecture)
 git clone https://github.com/cffan/neural_seq_decoder.git
 pip install -e neural_seq_decoder
 
-# 2. Install this project's dependencies
+# 3. Install this project's dependencies
 pip install -r requirements.txt
 
-# 3. (Optional) Install language model decoder for n-gram rescoring
+# 4. (Optional) Install language model decoder for n-gram rescoring
 git clone https://github.com/fwillett/speechBCI.git
 # Follow speechBCI/LanguageModelDecoder/README.md to compile and install KenLM
 ```
