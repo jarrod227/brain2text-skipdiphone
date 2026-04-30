@@ -40,13 +40,16 @@ Five ablation variants are studied:
 Install in this order:
 
 ```bash
+# Run from anywhere:
 # 1. Install PyTorch with CUDA support (adjust cu118 to match your CUDA version)
 pip install torch --index-url https://download.pytorch.org/whl/cu118
 # See https://pytorch.org/get-started/locally/ for the right command
 
+# Run from inside the brain2text-skipdiphone/ directory:
 # 2. Install this project's dependencies
 pip install -r requirements.txt
 
+# Run from outside the brain2text-skipdiphone/ directory:
 # 3. (Optional) Install language model decoder for n-gram rescoring
 git clone https://github.com/fwillett/speechBCI.git
 # Follow speechBCI/LanguageModelDecoder/README.md to compile and install KenLM
@@ -59,6 +62,7 @@ git clone https://github.com/fwillett/speechBCI.git
 1. Download the Brain-to-Text '24 dataset from Dryad (DOI: 10.5061/dryad.x69p8czpq, Version 4)
 2. Convert TFRecords to `.pkl` (one-time, requires TensorFlow):
 ```bash
+# Run from outside the brain2text-skipdiphone/ directory:
 git clone https://github.com/cffan/neural_seq_decoder.git
 # Open and run: neural_seq_decoder/notebooks/formatCompetitionData.ipynb
 ```
