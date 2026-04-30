@@ -96,7 +96,7 @@ def main():
     ).to(device)
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
-    test_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "test", "*.tfrecord")))
+    test_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "test", "*.pkl")))
     loader = make_dataloader(test_paths, cfg.batch_size, shuffle=False)
 
     lm = load_lm(cfg.lm_dir, args.lm)
