@@ -16,8 +16,6 @@ Two encoder implementations are provided:
   - nn.GRU-based encoder:       commented out below for reference
 """
 
-import math
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
