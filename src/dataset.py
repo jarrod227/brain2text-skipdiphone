@@ -1,50 +1,63 @@
 """
-Loads Brain-to-Text '24 data from TFRecords (via TensorFlow) and wraps
+Loads Brain-to-Text '24 data from pre-converted .pkl files and wraps
 them in a PyTorch Dataset / DataLoader.
 
-Each TFRecord file corresponds to one recording session (day).
-The day_id is derived from the file's index in the sorted file list.
+Convert TFRecords to .pkl first using:
+  notebooks/formatCompetitionData.ipynb  (from cffan/neural_seq_decoder)
+
+Expected pkl structure (one file per recording session/day):
+  {
+    'sentenceDat':    list of np.ndarray, each (T, 256)   neural features
+    'phonemes':       np.ndarray (N, 500)                 zero-padded phoneme seqs
+    'phoneLens':      np.ndarray (N,)                     actual phoneme counts
+    'timeSeriesLens': np.ndarray (N,)                     actual frame counts
+    'transcriptions': list of str                         spoken sentences
+  }
 """
 
+import pickle
+from pathlib import Path
+
+import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
 
 class BrainToTextDataset(Dataset):
-    def __init__(self, tfrecord_paths, num_phonemes=40, debug_subset=False):
+    def __init__(self, pkl_paths, num_phonemes=40, debug_subset=False):
         self.num_phonemes = num_phonemes
-        self.samples = self._load_tfrecords(tfrecord_paths, debug_subset)
+        self.samples = self._load_pkls(pkl_paths, debug_subset)
 
-    def _load_tfrecords(self, paths, debug_subset):
-        import tensorflow as tf
-
-        feature_spec = {
-            "neuralFeatures":    tf.io.FixedLenSequenceFeature([], tf.float32, allow_missing=True),
-            "phoneSeq":          tf.io.FixedLenSequenceFeature([], tf.int64,   allow_missing=True),
-            "neuralFeatureSize": tf.io.FixedLenFeature([], tf.int64),
-        }
-
+    def _load_pkls(self, paths, debug_subset):
         samples = []
-        # Each file = one recording day; file index becomes the day_id
+        # Each file = one recording session; file index becomes day_id
         for day_id, path in enumerate(paths):
-            raw_ds = tf.data.TFRecordDataset(path)
-            for raw in raw_ds:
-                ex       = tf.io.parse_single_example(raw, feature_spec)
-                feat_dim = int(ex["neuralFeatureSize"].numpy())
-                neural   = ex["neuralFeatures"].numpy().reshape(-1, feat_dim)
-                phones   = ex["phoneSeq"].numpy().tolist()
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+
+            n_trials = len(data["sentenceDat"])
+            for i in range(n_trials):
+                neural    = data["sentenceDat"][i].astype(np.float32)   # (T, 256)
+                phone_len = int(data["phoneLens"][i])
+                phones    = data["phonemes"][i, :phone_len].tolist()    # actual phonemes
+                frame_len = int(data["timeSeriesLens"][i])
+                neural    = neural[:frame_len]                          # trim to true length
+
                 diphones  = self._phones_to_diphones(phones)
                 skip_dip  = self._phones_to_skip_diphones(phones)
+
                 samples.append({
-                    "neural":       torch.tensor(neural,    dtype=torch.float32),
+                    "neural":       torch.tensor(neural,   dtype=torch.float32),
                     "day_id":       day_id,
-                    "mono":         torch.tensor(phones,    dtype=torch.long),
-                    "diphone":      torch.tensor(diphones,  dtype=torch.long),
-                    "skip_diphone": torch.tensor(skip_dip,  dtype=torch.long),
+                    "mono":         torch.tensor(phones,   dtype=torch.long),
+                    "diphone":      torch.tensor(diphones, dtype=torch.long),
+                    "skip_diphone": torch.tensor(skip_dip, dtype=torch.long),
                 })
+
                 if debug_subset and len(samples) >= 200:
                     return samples
+
         return samples
 
     def _phones_to_diphones(self, phones):
@@ -99,9 +112,9 @@ def collate_fn(batch):
     }
 
 
-def make_dataloader(tfrecord_paths, batch_size, num_phonemes=40,
+def make_dataloader(pkl_paths, batch_size, num_phonemes=40,
                     debug_subset=False, shuffle=True, num_workers=4):
-    ds = BrainToTextDataset(tfrecord_paths, num_phonemes, debug_subset)
+    ds = BrainToTextDataset(pkl_paths, num_phonemes, debug_subset)
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                       collate_fn=collate_fn, num_workers=num_workers,
                       pin_memory=True)
