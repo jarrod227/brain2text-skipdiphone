@@ -11,7 +11,7 @@ encoder:
 # Classes
 num_phonemes: 40          # CMU phoneme set size
 num_diphones: 1600        # 40 * 40
-num_days: 50              # number of recording sessions in the dataset
+num_days: 50              # set to actual number of .pkl files after data conversion
 
 # Loss weights  (Eq. 1 in proposal)
 alpha: 0.6                # weight for standard diphone CTC loss
