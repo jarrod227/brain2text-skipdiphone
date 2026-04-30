@@ -44,14 +44,10 @@ Install in this order:
 pip install torch --index-url https://download.pytorch.org/whl/cu118
 # See https://pytorch.org/get-started/locally/ for the right command
 
-# 2. Clone and install the PyTorch DCoND baseline (reference architecture)
-git clone https://github.com/cffan/neural_seq_decoder.git
-pip install -e neural_seq_decoder
-
-# 3. Install this project's dependencies
+# 2. Install this project's dependencies
 pip install -r requirements.txt
 
-# 4. (Optional) Install language model decoder for n-gram rescoring
+# 3. (Optional) Install language model decoder for n-gram rescoring
 git clone https://github.com/fwillett/speechBCI.git
 # Follow speechBCI/LanguageModelDecoder/README.md to compile and install KenLM
 ```
@@ -60,8 +56,14 @@ git clone https://github.com/fwillett/speechBCI.git
 
 ## Data
 
-Download the Brain-to-Text '24 dataset from Dryad (DOI: 10.5061/dryad.x69p8czpq, Version 4)
-and place it under `data/`. See [data/README.md](data/README.md) for the expected layout.
+1. Download the Brain-to-Text '24 dataset from Dryad (DOI: 10.5061/dryad.x69p8czpq, Version 4)
+2. Convert TFRecords to `.pkl` (one-time, requires TensorFlow):
+```bash
+git clone https://github.com/cffan/neural_seq_decoder.git
+# Open and run: neural_seq_decoder/notebooks/formatCompetitionData.ipynb
+```
+
+See [data/README.md](data/README.md) for the expected layout after conversion.
 
 ---
 
