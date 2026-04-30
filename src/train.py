@@ -98,8 +98,8 @@ def main():
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "train", "*.tfrecord")))
-    val_paths   = sorted(glob.glob(os.path.join(cfg.data_dir, "test",  "*.tfrecord")))
+    train_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "train", "*.pkl")))
+    val_paths   = sorted(glob.glob(os.path.join(cfg.data_dir, "test",  "*.pkl")))
 
     train_loader = make_dataloader(train_paths, cfg.batch_size,
                                    debug_subset=cfg.debug_subset, shuffle=True)
