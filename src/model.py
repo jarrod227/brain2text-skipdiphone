@@ -106,8 +106,7 @@ class InputPreprocessor(nn.Module):
         # Sliding-window unfold: (B, T, D) -> (B, D*kernel_len, T')
         x = x.permute(0, 2, 1).unsqueeze(-1)          # (B, D, T, 1)
         x = self.unfolder(x)                           # (B, D*kernel_len, T')
-        T_prime = x.shape[-1]
-        x = x.permute(0, 2, 1).contiguous()           # (B, T', D*kernel_len)
+        x = x.permute(0, 2, 1).contiguous()            # (B, T', D*kernel_len)
 
         # Update lengths to match strided output
         new_lengths = ((lengths - self.kernel_len) // self.stride_len + 1).clamp(min=1)
@@ -199,7 +198,7 @@ class BidirectionalGRU(nn.Module):
 
         # Zero out positions beyond each sequence's true length
         mask = torch.arange(T, device=x.device).unsqueeze(0) >= lengths.unsqueeze(1)
-        out[mask] = 0.0
+        out = out.masked_fill(mask.unsqueeze(-1), 0.0)
 
         return out
 
