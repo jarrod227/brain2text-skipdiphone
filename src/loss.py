@@ -9,7 +9,6 @@ Training objective (Eq. 1 from proposal):
   L_smooth = (1 / T-1) * sum_{t=2}^{T} || p_t - p_{t-1} ||_2^2
 """
 
-import torch
 import torch.nn as nn
 
 
@@ -25,7 +24,7 @@ def smoothness_loss(phoneme_probs, lengths):
     sq   = (diff ** 2).sum(dim=-1)                                # (B, T-1)
 
     total, count = 0.0, 0
-    for i, L in enumerate(lengths):
+    for i, L in enumerate(lengths.cpu().tolist()):
         if L > 1:
             total += sq[i, : L - 1].mean()
             count += 1
