@@ -86,11 +86,11 @@ Checkpoints and logs are written to `experiments/<run_name>/`.
 ## Evaluation
 
 ```bash
-# Decode with 3-gram LM and report PER / WER
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --lm 3gram
+# PER only (no LM required)
+python src/decode.py --checkpoint experiments/<run_name>/best.pt
 
-# Decode with 5-gram LM
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --lm 5gram
+# PER + WER with 3-gram LM (requires speechBCI LanguageModelDecoder)
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --lm 3gram
 ```
 
 ---
