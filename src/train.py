@@ -97,8 +97,10 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     train_loader = make_dataloader(cfg.data_path, "train", cfg.batch_size,
+                                   num_phonemes=cfg.num_phonemes,
                                    debug_subset=cfg.debug_subset, shuffle=True)
     val_loader   = make_dataloader(cfg.data_path, "test",  cfg.batch_size,
+                                   num_phonemes=cfg.num_phonemes,
                                    debug_subset=cfg.debug_subset, shuffle=False)
 
     model = SkipDiphoneDecoder(
