@@ -59,15 +59,12 @@ git clone https://github.com/fwillett/speechBCI.git
 
 ## Data
 
-1. Download the Brain-to-Text '24 dataset from Dryad (DOI: 10.5061/dryad.x69p8czpq, Version 4)
-2. Convert TFRecords to `.pkl` (one-time, requires TensorFlow):
-```bash
-# Run from outside the brain2text-skipdiphone/ directory:
-git clone https://github.com/cffan/neural_seq_decoder.git
-# Open and run: neural_seq_decoder/notebooks/formatCompetitionData.ipynb
-```
+See [data/README.md](data/README.md) for full download and conversion instructions.
 
-See [data/README.md](data/README.md) for the expected layout after conversion.
+Summary:
+1. Download `competitionData.tar.gz` (required, 3.67 GB) and optionally `languageModel.tar.gz` (14.11 GB, for WER) from https://doi.org/10.5061/dryad.x69p8czpq
+2. Convert `.mat` files to `.pkl` using cffan's `formatCompetitionData.ipynb`
+3. Set `data_path: "data/competitionData.pkl"` in `configs/default.yaml`
 
 ---
 
