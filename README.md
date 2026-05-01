@@ -70,17 +70,32 @@ Summary:
 
 ## Training
 
-```bash
-# Train a specific ablation variant (A–E)
-python src/train.py --variant E --config configs/default.yaml
+Run all variants sequentially (one GPU). Each variant takes ~1 hour on a TITAN X.
 
-# Sweep smoothness weight lambda
-python src/train.py --variant C --lambda_smooth 1e-3 --config configs/default.yaml
-python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml
-python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml
+```bash
+# Variants A and B (baselines)
+nohup python src/train.py --variant A --config configs/default.yaml > experiments/variant_A.log 2>&1 &
+wait
+nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
+wait
+
+# Variant C: sweep lambda_smooth to find the best value before running D/E
+nohup python src/train.py --variant C --lambda_smooth 1e-3 --config configs/default.yaml > experiments/variant_C_lam1e-3.log 2>&1 &
+wait
+nohup python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml > experiments/variant_C_lam5e-3.log 2>&1 &
+wait
+nohup python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml > experiments/variant_C_lam1e-2.log 2>&1 &
+wait
+
+# Variants D and E (use the best lambda_smooth found above for E)
+nohup python src/train.py --variant D --config configs/default.yaml > experiments/variant_D.log 2>&1 &
+wait
+nohup python src/train.py --variant E --config configs/default.yaml > experiments/variant_E.log 2>&1 &
+wait
 ```
 
-Checkpoints and logs are written to `experiments/<run_name>/`.
+Checkpoints and logs are written to `experiments/<run_name>/`.  
+Monitor progress: `tail -f experiments/<run_name>.log`
 
 ---
 
