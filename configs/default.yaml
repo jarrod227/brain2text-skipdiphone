@@ -24,6 +24,7 @@ batch_size: 64
 num_epochs: 50
 learning_rate: 0.02
 lr_schedule: cosine
+warmup_epochs: 5          # linear warmup; required because lr=0.02 diverges from cold start
 grad_clip: 1.0
 seed: 42
 
