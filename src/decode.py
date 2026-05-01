@@ -122,7 +122,8 @@ def main():
     ).to(device)
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
-    loader = make_dataloader(cfg.data_path, "test", cfg.batch_size, shuffle=False)
+    loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
+                             num_phonemes=cfg.num_phonemes, shuffle=False)
 
     per, wer = decode(model, loader, device, variant=cfg.variant, lm=args.lm)
     print(f"PER: {per * 100:.2f}%")
