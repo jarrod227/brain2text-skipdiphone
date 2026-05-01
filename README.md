@@ -89,6 +89,13 @@ Run one at a time. Monitor progress with `tail -f experiments/<log_file>`.
 Wait for `Epoch 050` before starting the next variant.
 Checkpoints are written to `experiments/<run_name>/`.
 
+**Tip — two GPUs:** PyTorch defaults to GPU 0. If a second GPU is available and idle,
+run a second variant in parallel on GPU 1:
+```bash
+CUDA_VISIBLE_DEVICES=1 nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
+```
+Check GPU status with `watch -n 1 nvidia-smi`.
+
 ---
 
 ## Evaluation
