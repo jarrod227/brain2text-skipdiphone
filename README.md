@@ -37,7 +37,14 @@ Five ablation variants are studied:
 
 ## Installation
 
-Install in this order:
+Create and activate a dedicated conda environment first:
+
+```bash
+conda create -n b2t python=3.9
+conda activate b2t
+```
+
+Then install dependencies in this order:
 
 ```bash
 # Run from anywhere:
