@@ -95,10 +95,10 @@ Checkpoints are written to `experiments/<run_name>/`.
 
 ```bash
 # PER only (no LM required)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --config configs/default.yaml
 
 # PER + WER with 3-gram LM (requires speechBCI LanguageModelDecoder)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --lm 3gram
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --config configs/default.yaml --lm 3gram
 ```
 
 ---
