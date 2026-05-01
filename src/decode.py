@@ -10,8 +10,6 @@ Usage:
 """
 
 import argparse
-import glob
-import os
 
 import editdistance
 import torch
@@ -92,8 +90,7 @@ def main():
     ).to(device)
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
 
-    test_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "test", "*.pkl")))
-    loader = make_dataloader(test_paths, cfg.batch_size, shuffle=False)
+    loader = make_dataloader(cfg.data_path, "test", cfg.batch_size, shuffle=False)
 
     per, wer = decode(model, loader, device, lm=args.lm)
     print(f"PER: {per * 100:.2f}%")
