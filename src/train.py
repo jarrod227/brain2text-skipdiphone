@@ -117,8 +117,19 @@ def main():
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=cfg.num_epochs)
+    # Linear warmup (10% -> 100% of lr over `warmup_epochs`) then cosine annealing.
+    # Required because lr=0.02 + 5-layer GRU diverges in the first batch from cold start.
+    warmup = cfg.warmup_epochs
+    scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer,
+        schedulers=[
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer, T_max=cfg.num_epochs - warmup),
+        ],
+        milestones=[warmup],
+    )
 
     run_name = build_run_name(cfg, variant, lambda_smooth)
     save_dir = Path(cfg.log_dir) / run_name
