@@ -180,7 +180,9 @@ class BidirectionalGRU(nn.Module):
 
             fwd_outs = []
             for t in range(T):
-                h_fwd = self.fwd_cells[layer](out[:, t, :], h_fwd)
+                active = (t < lengths).float().unsqueeze(1)   # (B, 1)
+                h_new  = self.fwd_cells[layer](out[:, t, :], h_fwd)
+                h_fwd  = active * h_new + (1 - active) * h_fwd
                 fwd_outs.append(h_fwd)
 
             # Process backward direction starting from each sequence's last real frame.
