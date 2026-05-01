@@ -120,7 +120,7 @@ def main():
         gaussian_smooth_width=cfg.encoder.gaussian_smooth_width,
         dropout=cfg.encoder.dropout,
     ).to(device)
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
+    model.load_state_dict(torch.load(args.checkpoint, map_location=device, weights_only=True))
 
     loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
                              num_phonemes=cfg.num_phonemes, shuffle=False)
