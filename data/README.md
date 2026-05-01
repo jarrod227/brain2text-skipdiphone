@@ -3,19 +3,27 @@
 ## Step 1: Download raw data
 
 Download from Dryad (DOI: 10.5061/dryad.x69p8czpq, Version 4).
-In your browser, click each file to get its signed download URL, then on your
-remote server run from inside `brain2text-skipdiphone/`:
+Dryad blocks automated downloaders (wget/curl), so download the files
+manually in your browser and transfer them to the remote server with `scp`.
+
+**In your browser:** go to the Dryad page and click **Download** next to
+`competitionData.tar.gz` (3.67 GB, required) and optionally
+`languageModel.tar.gz` (14.11 GB, only needed for WER evaluation).
+
+**Transfer from your local machine to the remote server** (run in a local
+terminal, e.g. PowerShell on Windows):
 
 ```bash
-# Required: competition splits as .mat files (3.67 GB)
-wget -O data/competitionData.tar.gz "<competitionData.tar.gz URL>"
+scp /path/to/competitionData.tar.gz user@server:~/brain2text-skipdiphone/data/
+scp /path/to/languageModel.tar.gz  user@server:~/brain2text-skipdiphone/data/  # optional
+```
 
-# Optional: 3-gram language model for WER evaluation (14.11 GB)
-wget -O data/languageModel.tar.gz "<languageModel.tar.gz URL>"
+**On the remote server**, from inside `brain2text-skipdiphone/`:
 
+```bash
 # Extract
 tar -xzf data/competitionData.tar.gz -C data/
-tar -xzf data/languageModel.tar.gz  -C data/   # if downloaded
+tar -xzf data/languageModel.tar.gz   -C data/   # if downloaded
 
 # Remove archives to save disk space
 rm data/*.tar.gz
