@@ -45,17 +45,6 @@ def _ctc_collapse(frame_ids, blank):
     return [t for t in collapsed if t != blank]
 
 
-def _collapse_no_blank(frame_ids):
-    """Collapse consecutive duplicate tokens (no blank class)."""
-    collapsed = []
-    prev = None
-    for t in frame_ids:
-        if t != prev:
-            collapsed.append(t)
-            prev = t
-    return collapsed
-
-
 @torch.no_grad()
 def decode(model, loader, device, variant="E", lm=None):
     model.eval()
@@ -68,15 +57,14 @@ def decode(model, loader, device, variant="E", lm=None):
 
         mono_lp, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
 
-        # CTC greedy decode:
-        # Variant A  — argmax over all classes (including blank), then CTC collapse.
-        # Variants B-E — argmax over marginalized phoneme probs (no blank), then
-        #                collapse consecutive duplicates.
-        blank = model.num_phonemes  # blank index (== C) for both mono and marginalized heads
+        # CTC greedy decode for all variants: argmax per frame (over phonemes+blank),
+        # then collapse consecutive duplicates and drop blank.
+        # Variant A reads from the mono head; B-E read from marginalized phoneme_probs.
+        blank = model.num_phonemes
         if variant == "A":
             frame_ids = mono_lp.permute(1, 0, 2).argmax(dim=-1).cpu().tolist()  # (B, T')
         else:
-            frame_ids = phoneme_probs.argmax(dim=-1).cpu().tolist()  # (B, T')
+            frame_ids = phoneme_probs.argmax(dim=-1).cpu().tolist()             # (B, T')
         hyp_phones = [_ctc_collapse(seq[:L], blank)
                       for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
 
