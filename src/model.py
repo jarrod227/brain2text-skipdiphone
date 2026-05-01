@@ -64,7 +64,7 @@ class InputPreprocessor(nn.Module):
         self.kernel_len  = kernel_len
         self.stride_len  = stride_len
 
-        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=20,
+        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=21,
                                           sigma=gaussian_smooth_width)
 
         # Day-specific linear transform: one (D, D) matrix + (1, D) bias per day
@@ -183,11 +183,14 @@ class BidirectionalGRU(nn.Module):
                 h_fwd = self.fwd_cells[layer](out[:, t, :], h_fwd)
                 fwd_outs.append(h_fwd)
 
-            bwd_outs = []
+            # Process backward direction starting from each sequence's last real frame.
+            # Build a per-step active mask so padded frames don't corrupt h_bwd.
+            bwd_outs = [None] * T
             for t in range(T - 1, -1, -1):
-                h_bwd = self.bwd_cells[layer](out[:, t, :], h_bwd)
-                bwd_outs.append(h_bwd)
-            bwd_outs = list(reversed(bwd_outs))
+                active = (t < lengths).float().unsqueeze(1)   # (B, 1)
+                h_new  = self.bwd_cells[layer](out[:, t, :], h_bwd)
+                h_bwd  = active * h_new + (1 - active) * h_bwd
+                bwd_outs[t] = h_bwd
 
             fwd_tensor = torch.stack(fwd_outs, dim=1)   # (B, T, H)
             bwd_tensor = torch.stack(bwd_outs, dim=1)   # (B, T, H)
