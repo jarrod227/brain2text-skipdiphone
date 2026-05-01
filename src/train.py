@@ -7,9 +7,7 @@ Usage:
 """
 
 import argparse
-import glob
 import json
-import os
 import random
 from pathlib import Path
 
@@ -98,12 +96,9 @@ def main():
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    train_paths = sorted(glob.glob(os.path.join(cfg.data_dir, "train", "*.pkl")))
-    val_paths   = sorted(glob.glob(os.path.join(cfg.data_dir, "test",  "*.pkl")))
-
-    train_loader = make_dataloader(train_paths, cfg.batch_size,
+    train_loader = make_dataloader(cfg.data_path, "train", cfg.batch_size,
                                    debug_subset=cfg.debug_subset, shuffle=True)
-    val_loader   = make_dataloader(val_paths,   cfg.batch_size,
+    val_loader   = make_dataloader(cfg.data_path, "test",  cfg.batch_size,
                                    debug_subset=cfg.debug_subset, shuffle=False)
 
     model = SkipDiphoneDecoder(
