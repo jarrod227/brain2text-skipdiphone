@@ -28,7 +28,7 @@ import torch.nn.functional as F
 class GaussianSmoothing1D(nn.Module):
     """Fixed depthwise conv1d with a Gaussian kernel along the time axis."""
 
-    def __init__(self, num_channels, kernel_size=20, sigma=2.0):
+    def __init__(self, num_channels, kernel_size=21, sigma=2.0):
         super().__init__()
         # Build 1-D Gaussian kernel
         half = (kernel_size - 1) / 2.0
