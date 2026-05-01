@@ -11,7 +11,7 @@ encoder:
 # Classes
 num_phonemes: 40          # CMU phoneme set size
 num_diphones: 1600        # 40 * 40
-num_days: 50              # set to actual number of .pkl files after data conversion
+num_days: 24              # 24 recording sessions (April–August 2022)
 
 # Loss weights  (Eq. 1 in proposal)
 alpha: 0.6                # weight for standard diphone CTC loss
@@ -28,10 +28,9 @@ grad_clip: 1.0
 seed: 42
 
 # Data
-data_dir: "data/competitionData"
+data_path: "data/competitionData.pkl"  # output of formatCompetitionData.ipynb
 lm_dir: "data/languageModel"
-derived_dir: "data/derived"
-debug_subset: false        # set true to use a single session for fast debugging
+debug_subset: false        # set true to use first 200 trials for fast debugging
 
 # Logging
 log_dir: "experiments"
