@@ -71,31 +71,23 @@ Summary:
 ## Training
 
 Run all variants sequentially (one GPU). Each variant takes ~1 hour on a TITAN X.
+Use `tmux` so the session survives after closing the terminal.
 
 ```bash
-# Variants A and B (baselines)
-nohup python src/train.py --variant A --config configs/default.yaml > experiments/variant_A.log 2>&1 &
-wait
-nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
-wait
+tmux new -s train   # create a persistent session; Ctrl+B then D to detach
+                    # tmux attach -t train  to come back later
 
-# Variant C: sweep lambda_smooth to find the best value before running D/E
-nohup python src/train.py --variant C --lambda_smooth 1e-3 --config configs/default.yaml > experiments/variant_C_lam1e-3.log 2>&1 &
-wait
-nohup python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml > experiments/variant_C_lam5e-3.log 2>&1 &
-wait
-nohup python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml > experiments/variant_C_lam1e-2.log 2>&1 &
-wait
-
-# Variants D and E (use the best lambda_smooth found above for E)
-nohup python src/train.py --variant D --config configs/default.yaml > experiments/variant_D.log 2>&1 &
-wait
-nohup python src/train.py --variant E --config configs/default.yaml > experiments/variant_E.log 2>&1 &
-wait
+python src/train.py --variant A --config configs/default.yaml && \
+python src/train.py --variant B --config configs/default.yaml && \
+python src/train.py --variant C --lambda_smooth 1e-3 --config configs/default.yaml && \
+python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml && \
+python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml && \
+python src/train.py --variant D --config configs/default.yaml && \
+python src/train.py --variant E --config configs/default.yaml
 ```
 
-Checkpoints and logs are written to `experiments/<run_name>/`.  
-Monitor progress: `tail -f experiments/<run_name>.log`
+`&&` chains runs automatically — each variant starts only after the previous one finishes successfully.
+Checkpoints and logs are written to `experiments/<run_name>/`.
 
 ---
 
