@@ -45,7 +45,7 @@ def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
         mono_log_probs:    (T, B, num_phonemes+1)
         diphone_log_probs: (T, B, num_diphones+1)
         skip_log_probs:    (T, B, num_diphones+1)
-        phoneme_probs:     (B, T, num_phonemes)
+        phoneme_probs:     (B, T, num_phonemes+1)  -- last dim is blank
         targets:           dict with keys 'mono', 'diphone', 'skip_diphone'
         input_lengths:     (B,)
         target_lengths:    dict with keys matching targets
