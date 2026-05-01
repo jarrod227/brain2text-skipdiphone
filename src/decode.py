@@ -19,7 +19,12 @@ from dataset import make_dataloader
 from model import SkipDiphoneDecoder
 
 
+SIL_ID = 39  # silence phoneme; excluded from PER following cffan convention
+
+
 def phoneme_error_rate(hyp, ref):
+    hyp = [p for p in hyp if p != SIL_ID]
+    ref = [p for p in ref if p != SIL_ID]
     return editdistance.eval(hyp, ref) / max(len(ref), 1)
 
 
@@ -67,15 +72,13 @@ def decode(model, loader, device, variant="E", lm=None):
         # Variant A  — argmax over all classes (including blank), then CTC collapse.
         # Variants B-E — argmax over marginalized phoneme probs (no blank), then
         #                collapse consecutive duplicates.
-        blank = model.num_phonemes  # blank index for the mono head
+        blank = model.num_phonemes  # blank index (== C) for both mono and marginalized heads
         if variant == "A":
             frame_ids = mono_lp.permute(1, 0, 2).argmax(dim=-1).cpu().tolist()  # (B, T')
-            hyp_phones = [_ctc_collapse(seq[:L], blank)
-                          for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
         else:
             frame_ids = phoneme_probs.argmax(dim=-1).cpu().tolist()  # (B, T')
-            hyp_phones = [_collapse_no_blank(seq[:L])
-                          for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
+        hyp_phones = [_ctc_collapse(seq[:L], blank)
+                      for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
 
         ref_phones = batch["targets"]["mono"].cpu().tolist()
         ref_lens   = batch["target_lengths"]["mono"].cpu().tolist()
