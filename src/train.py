@@ -117,17 +117,8 @@ def main():
     ).to(device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
-    warmup = cfg.get("warmup_epochs", 5)
-    scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimizer,
-        schedulers=[
-            torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup),
-            torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=cfg.num_epochs - warmup),
-        ],
-        milestones=[warmup],
-    )
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=cfg.num_epochs)
 
     run_name = build_run_name(cfg, variant, lambda_smooth)
     save_dir = Path(cfg.log_dir) / run_name
