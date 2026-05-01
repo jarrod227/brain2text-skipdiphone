@@ -277,7 +277,7 @@ class SkipDiphoneDecoder(nn.Module):
             mono_log_probs:    (T', B, num_phonemes+1)
             diphone_log_probs: (T', B, num_diphones+1)
             skip_log_probs:    (T', B, num_diphones+1)
-            phoneme_probs:     (B, T', num_phonemes)  -- marginalized from diphone
+            phoneme_probs:     (B, T', num_phonemes+1)  -- marginalized from diphone (last dim is blank)
             enc_lengths:       (B,)  sequence lengths after preprocessing stride
         """
         x, enc_lengths = self.preprocessor(x, day_ids, lengths)   # (B, T', D*K)
