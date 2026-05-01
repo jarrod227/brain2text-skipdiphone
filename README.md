@@ -37,7 +37,7 @@ Five ablation variants are studied:
 
 ## Installation
 
-Create and activate a dedicated conda environment first (Python ≤ 3.11 required; PyTorch does not yet support 3.12+):
+Create and activate a dedicated conda environment first (tested with Python 3.11):
 
 ```bash
 conda create -n b2t python=3.11
