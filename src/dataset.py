@@ -42,7 +42,7 @@ class BrainToTextDataset(Dataset):
             for i in range(n_trials):
                 neural    = day_data["sentenceDat"][i].astype(np.float32)  # (T, 256)
                 phone_len = int(day_data["phoneLens"][i])
-                phones    = day_data["phonemes"][i, :phone_len].tolist()
+                phones    = day_data["phonemes"][i][:phone_len].tolist()
                 frame_len = int(day_data["timeSeriesLens"][i])
                 neural    = neural[:frame_len]
 
