@@ -1,7 +1,6 @@
 # Data (download separately from Dryad)
 data/competitionData/
 data/languageModel/
-data/derived/
 
 # Experiment outputs
 experiments/*/
