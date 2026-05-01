@@ -9,27 +9,26 @@ Training objective (Eq. 1 from proposal):
   L_smooth = (1 / T-1) * sum_{t=2}^{T} || p_t - p_{t-1} ||_2^2
 """
 
+import torch
 import torch.nn as nn
 
 
 def smoothness_loss(phoneme_probs, lengths):
     """
     Args:
-        phoneme_probs: (B, T, num_phonemes)
+        phoneme_probs: (B, T, num_phonemes+1)
         lengths:       (B,) actual sequence lengths
     Returns:
         scalar mean smoothness loss
     """
-    diff = phoneme_probs[:, 1:, :] - phoneme_probs[:, :-1, :]   # (B, T-1, C)
+    B, T, _ = phoneme_probs.shape
+    diff = phoneme_probs[:, 1:, :] - phoneme_probs[:, :-1, :]   # (B, T-1, C+1)
     sq   = (diff ** 2).sum(dim=-1)                                # (B, T-1)
 
-    total, count = 0.0, 0
-    for i, L in enumerate(lengths.cpu().tolist()):
-        if L > 1:
-            total += sq[i, : L - 1].mean()
-            count += 1
-
-    return total / max(count, 1)
+    mask = (torch.arange(T - 1, device=sq.device).unsqueeze(0)
+            < (lengths - 1).clamp(min=0).unsqueeze(1)).float()
+    denom = mask.sum().clamp(min=1.0)
+    return (sq * mask).sum() / denom
 
 
 def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
