@@ -1,22 +1,23 @@
 """
-Loads Brain-to-Text '24 data from pre-converted .pkl files and wraps
-them in a PyTorch Dataset / DataLoader.
+Loads Brain-to-Text '24 data from the .pkl file produced by
+cffan/neural_seq_decoder's formatCompetitionData.ipynb.
 
-Convert TFRecords to .pkl first using:
-  notebooks/formatCompetitionData.ipynb  (from cffan/neural_seq_decoder)
-
-Expected pkl structure (one file per recording session/day):
+The pkl contains a single dict:
   {
-    'sentenceDat':    list of np.ndarray, each (T, 256)   neural features
-    'phonemes':       np.ndarray (N, 500)                 zero-padded phoneme seqs
-    'phoneLens':      np.ndarray (N,)                     actual phoneme counts
-    'timeSeriesLens': np.ndarray (N,)                     actual frame counts
-    'transcriptions': list of str                         spoken sentences
+    'train':       [dataset_day0, ..., dataset_day23],   # 24 days
+    'test':        [dataset_day0, ..., dataset_day23],   # 24 days
+    'competition': [dataset_day0, ..., dataset_day14],   # 15 days
   }
+
+Each per-day dataset has:
+  sentenceDat:    list of np.ndarray (T, 256)  -- tx1[:128] + spikePow[:128], z-scored
+  phonemes:       np.ndarray (N, 500)          -- zero-padded phoneme sequences
+  phoneLens:      np.ndarray (N,)              -- actual phoneme counts
+  timeSeriesLens: np.ndarray (N,)              -- actual frame counts
+  transcriptions: list of str
 """
 
 import pickle
-from pathlib import Path
 
 import numpy as np
 import torch
@@ -25,27 +26,28 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 class BrainToTextDataset(Dataset):
-    def __init__(self, pkl_paths, num_phonemes=40, debug_subset=False):
+    def __init__(self, pkl_path, split="train", num_phonemes=40, debug_subset=False):
         self.num_phonemes = num_phonemes
-        self.samples = self._load_pkls(pkl_paths, debug_subset)
+        self.samples = self._load(pkl_path, split, debug_subset)
 
-    def _load_pkls(self, paths, debug_subset):
+    def _load(self, pkl_path, split, debug_subset):
+        with open(pkl_path, "rb") as f:
+            all_data = pickle.load(f)
+
+        day_datasets = all_data[split]   # list of per-day dicts
         samples = []
-        # Each file = one recording session; file index becomes day_id
-        for day_id, path in enumerate(paths):
-            with open(path, "rb") as f:
-                data = pickle.load(f)
 
-            n_trials = len(data["sentenceDat"])
+        for day_id, day_data in enumerate(day_datasets):
+            n_trials = len(day_data["sentenceDat"])
             for i in range(n_trials):
-                neural    = data["sentenceDat"][i].astype(np.float32)   # (T, 256)
-                phone_len = int(data["phoneLens"][i])
-                phones    = data["phonemes"][i, :phone_len].tolist()    # actual phonemes
-                frame_len = int(data["timeSeriesLens"][i])
-                neural    = neural[:frame_len]                          # trim to true length
+                neural    = day_data["sentenceDat"][i].astype(np.float32)  # (T, 256)
+                phone_len = int(day_data["phoneLens"][i])
+                phones    = day_data["phonemes"][i, :phone_len].tolist()
+                frame_len = int(day_data["timeSeriesLens"][i])
+                neural    = neural[:frame_len]
 
-                diphones  = self._phones_to_diphones(phones)
-                skip_dip  = self._phones_to_skip_diphones(phones)
+                diphones = self._phones_to_diphones(phones)
+                skip_dip = self._phones_to_skip_diphones(phones)
 
                 samples.append({
                     "neural":       torch.tensor(neural,   dtype=torch.float32),
@@ -87,10 +89,6 @@ def collate_fn(batch):
     lengths  = torch.tensor([n.shape[0] for n in neural], dtype=torch.long)
     day_ids  = torch.tensor([s["day_id"] for s in batch], dtype=torch.long)
 
-    mono_cat    = torch.cat(mono)
-    diphone_cat = torch.cat(diphone)
-    skip_cat    = torch.cat(skip_dip)
-
     mono_lens    = torch.tensor([len(t) for t in mono],     dtype=torch.long)
     diphone_lens = torch.tensor([len(t) for t in diphone],  dtype=torch.long)
     skip_lens    = torch.tensor([len(t) for t in skip_dip], dtype=torch.long)
@@ -100,9 +98,9 @@ def collate_fn(batch):
         "lengths":  lengths,
         "day_ids":  day_ids,
         "targets": {
-            "mono":         mono_cat,
-            "diphone":      diphone_cat,
-            "skip_diphone": skip_cat,
+            "mono":         torch.cat(mono),
+            "diphone":      torch.cat(diphone),
+            "skip_diphone": torch.cat(skip_dip),
         },
         "target_lengths": {
             "mono":         mono_lens,
@@ -112,9 +110,9 @@ def collate_fn(batch):
     }
 
 
-def make_dataloader(pkl_paths, batch_size, num_phonemes=40,
+def make_dataloader(pkl_path, split, batch_size, num_phonemes=40,
                     debug_subset=False, shuffle=True, num_workers=4):
-    ds = BrainToTextDataset(pkl_paths, num_phonemes, debug_subset)
+    ds = BrainToTextDataset(pkl_path, split, num_phonemes, debug_subset)
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                       collate_fn=collate_fn, num_workers=num_workers,
                       pin_memory=True)
