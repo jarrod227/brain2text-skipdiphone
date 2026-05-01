@@ -42,7 +42,10 @@ class BrainToTextDataset(Dataset):
             for i in range(n_trials):
                 neural    = day_data["sentenceDat"][i].astype(np.float32)  # (T, 256)
                 phone_len = int(day_data["phoneLens"][i])
-                phones    = day_data["phonemes"][i][:phone_len].tolist()
+                # pkl stores phonemes as 1-indexed (formatCompetitionData adds +1
+                # so that 0 can serve as padding). Subtract 1 to get 0-indexed
+                # targets (0-39) expected by the model; CTC blank sits at index 40.
+                phones    = (day_data["phonemes"][i][:phone_len] - 1).tolist()
                 frame_len = int(day_data["timeSeriesLens"][i])
                 neural    = neural[:frame_len]
 
