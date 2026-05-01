@@ -16,13 +16,19 @@ import torch.nn as nn
 def smoothness_loss(phoneme_probs, lengths):
     """
     Args:
-        phoneme_probs: (B, T, num_phonemes+1)
+        phoneme_probs: (B, T, num_phonemes+1)  -- last dim is CTC blank
         lengths:       (B,) actual sequence lengths
     Returns:
         scalar mean smoothness loss
+
+    Smoothness is computed over the phoneme dims only (excluding blank).
+    Blank is intentionally excluded: CTC relies on blank spiking at phoneme
+    boundaries, so penalizing its frame-to-frame change would conflict with
+    the CTC objective.
     """
     B, T, _ = phoneme_probs.shape
-    diff = phoneme_probs[:, 1:, :] - phoneme_probs[:, :-1, :]   # (B, T-1, C+1)
+    phone_only = phoneme_probs[..., :-1]                          # (B, T, C)
+    diff = phone_only[:, 1:, :] - phone_only[:, :-1, :]           # (B, T-1, C)
     sq   = (diff ** 2).sum(dim=-1)                                # (B, T-1)
 
     mask = (torch.arange(T - 1, device=sq.device).unsqueeze(0)
