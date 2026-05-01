@@ -295,13 +295,15 @@ class SkipDiphoneDecoder(nn.Module):
         """
         Recover per-frame phoneme probs by summing over the previous-phoneme dim.
         diphone class index = prev_phoneme * num_phonemes + curr_phoneme
-        (B, T', num_diphones+1) -> (B, T', num_phonemes)
+        (B, T', num_diphones+1) -> (B, T', num_phonemes+1)  [last dim is blank]
         """
         B, T, _ = diphone_log_probs.shape
         C = self.num_phonemes
 
-        diphone_probs = diphone_log_probs[..., :-1].exp()      # drop blank, (B, T, C*C)
-        diphone_probs = diphone_probs.view(B, T, C, C)         # (B, T, prev, curr)
-        phoneme_probs = diphone_probs.sum(dim=2)               # (B, T, curr)
+        diphone_probs = diphone_log_probs.exp()
+        blank_p = diphone_probs[..., -1:]                      # (B, T, 1)  blank mass
+        dip_p   = diphone_probs[..., :-1].view(B, T, C, C)    # (B, T, prev, curr)
+        phone_p = dip_p.sum(dim=2)                             # (B, T, C)
+        phoneme_probs = torch.cat([phone_p, blank_p], dim=-1)  # (B, T, C+1)
         phoneme_probs = phoneme_probs / (phoneme_probs.sum(dim=-1, keepdim=True) + 1e-8)
         return phoneme_probs
