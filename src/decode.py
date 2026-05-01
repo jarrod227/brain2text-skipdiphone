@@ -29,6 +29,28 @@ def word_error_rate(hyp_words, ref_words):
     return editdistance.eval(hyp, ref) / max(len(ref), 1)
 
 
+def _ctc_collapse(frame_ids, blank):
+    """Collapse consecutive duplicate tokens then remove blank."""
+    collapsed = []
+    prev = None
+    for t in frame_ids:
+        if t != prev:
+            collapsed.append(t)
+            prev = t
+    return [t for t in collapsed if t != blank]
+
+
+def _collapse_no_blank(frame_ids):
+    """Collapse consecutive duplicate tokens (no blank class)."""
+    collapsed = []
+    prev = None
+    for t in frame_ids:
+        if t != prev:
+            collapsed.append(t)
+            prev = t
+    return collapsed
+
+
 @torch.no_grad()
 def decode(model, loader, device, variant="E", lm=None):
     model.eval()
@@ -41,21 +63,27 @@ def decode(model, loader, device, variant="E", lm=None):
 
         mono_lp, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
 
-        # Greedy decode: for variant A use the mono head (blank at last index);
-        # for B–E use marginalized phoneme probs (no blank class).
+        # CTC greedy decode:
+        # Variant A  — argmax over all classes (including blank), then CTC collapse.
+        # Variants B-E — argmax over marginalized phoneme probs (no blank), then
+        #                collapse consecutive duplicates.
+        blank = model.num_phonemes  # blank index for the mono head
         if variant == "A":
-            hyp_phones = mono_lp.permute(1, 0, 2)[..., :-1].argmax(dim=-1).cpu().tolist()
+            frame_ids = mono_lp.permute(1, 0, 2).argmax(dim=-1).cpu().tolist()  # (B, T')
+            hyp_phones = [_ctc_collapse(seq[:L], blank)
+                          for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
         else:
-            hyp_phones = phoneme_probs.argmax(dim=-1).cpu().tolist()
+            frame_ids = phoneme_probs.argmax(dim=-1).cpu().tolist()  # (B, T')
+            hyp_phones = [_collapse_no_blank(seq[:L])
+                          for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
 
         ref_phones = batch["targets"]["mono"].cpu().tolist()
         ref_lens   = batch["target_lengths"]["mono"].cpu().tolist()
 
         offset = 0
-        for i, L in enumerate(enc_lengths.cpu().tolist()):
+        for i in range(len(hyp_phones)):
             ref_seq = ref_phones[offset: offset + ref_lens[i]]
-            hyp_seq = hyp_phones[i][:L]
-            per_scores.append(phoneme_error_rate(hyp_seq, ref_seq))
+            per_scores.append(phoneme_error_rate(hyp_phones[i], ref_seq))
             offset += ref_lens[i]
 
         # LM decoding for WER (requires speechBCI LanguageModelDecoder)
