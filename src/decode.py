@@ -30,7 +30,7 @@ def word_error_rate(hyp_words, ref_words):
 
 
 @torch.no_grad()
-def decode(model, loader, device, lm=None):
+def decode(model, loader, device, variant="E", lm=None):
     model.eval()
     per_scores, wer_scores = [], []
 
@@ -39,10 +39,14 @@ def decode(model, loader, device, lm=None):
         lengths  = batch["lengths"].to(device)
         day_ids  = batch["day_ids"].to(device)
 
-        _, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
+        mono_lp, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
 
-        # Greedy decode: argmax over phoneme dimension per frame
-        hyp_phones = phoneme_probs.argmax(dim=-1).cpu().tolist()
+        # Greedy decode: for variant A use the mono head (blank at last index);
+        # for B–E use marginalized phoneme probs (no blank class).
+        if variant == "A":
+            hyp_phones = mono_lp.permute(1, 0, 2)[..., :-1].argmax(dim=-1).cpu().tolist()
+        else:
+            hyp_phones = phoneme_probs.argmax(dim=-1).cpu().tolist()
 
         ref_phones = batch["targets"]["mono"].cpu().tolist()
         ref_lens   = batch["target_lengths"]["mono"].cpu().tolist()
@@ -92,7 +96,7 @@ def main():
 
     loader = make_dataloader(cfg.data_path, "test", cfg.batch_size, shuffle=False)
 
-    per, wer = decode(model, loader, device, lm=args.lm)
+    per, wer = decode(model, loader, device, variant=cfg.variant, lm=args.lm)
     print(f"PER: {per * 100:.2f}%")
     if args.lm is not None:
         print(f"WER: {wer * 100:.2f}%")
