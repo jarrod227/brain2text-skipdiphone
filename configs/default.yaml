@@ -16,7 +16,7 @@ num_days: 24              # 24 recording sessions (April–August 2022)
 # Loss weights  (Eq. 1 in proposal)
 alpha: 0.6                # weight for standard diphone CTC loss
 beta: 0.1                 # weight for skip-diphone auxiliary CTC loss (small by design)
-lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-3, 5e-3, 1e-2]
+lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-4, 1e-3, 5e-3, 1e-2]
 
 # Training
 variant: "E"              # ablation variant: A | B | C | D | E
