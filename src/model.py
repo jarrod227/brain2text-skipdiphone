@@ -210,25 +210,25 @@ class BidirectionalGRU(nn.Module):
 # PyTorch built-in alternative (uncomment to swap in, comment out the
 # BidirectionalGRU block in SkipDiphoneDecoder.__init__ and forward)
 # ---------------------------------------------------------------------------
-# class TorchGRUEncoder(nn.Module):
-#     def __init__(self, input_dim, hidden_dim, num_layers, dropout=0.4):
-#         super().__init__()
-#         self.gru = nn.GRU(
-#             input_size=input_dim,
-#             hidden_size=hidden_dim,
-#             num_layers=num_layers,
-#             batch_first=True,
-#             dropout=dropout if num_layers > 1 else 0.0,
-#             bidirectional=True,
-#         )
-#
-#     def forward(self, x, lengths):
-#         packed = nn.utils.rnn.pack_padded_sequence(
-#             x, lengths.cpu(), batch_first=True, enforce_sorted=False
-#         )
-#         out, _ = self.gru(packed)
-#         out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
-#         return out   # (B, T, 2 * hidden_dim)
+class TorchGRUEncoder(nn.Module):
+    def __init__(self, input_dim, hidden_dim, num_layers, dropout=0.4):
+        super().__init__()
+        self.gru = nn.GRU(
+            input_size=input_dim,
+            hidden_size=hidden_dim,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+            bidirectional=True,
+        )
+
+    def forward(self, x, lengths):
+        packed = nn.utils.rnn.pack_padded_sequence(
+            x, lengths.cpu(), batch_first=True, enforce_sorted=False
+        )
+        out, _ = self.gru(packed)
+        out, _ = nn.utils.rnn.pad_packed_sequence(out, batch_first=True)
+        return out   # (B, T, 2 * hidden_dim)
 # ---------------------------------------------------------------------------
 
 
@@ -244,14 +244,13 @@ class SkipDiphoneDecoder(nn.Module):
             input_dim, num_days, kernel_len, stride_len, gaussian_smooth_width
         )
 
-        # Hand-written bidirectional GRU encoder
-        # Input dim after unfold: input_dim * kernel_len
-        self.encoder = BidirectionalGRU(
+        # nn.GRU encoder (cuDNN-accelerated, used for actual training)
+        self.encoder = TorchGRUEncoder(
             self.preprocessor.output_dim, hidden_dim, num_layers, dropout
         )
 
-        # Swap the two lines above with the following to use nn.GRU instead:
-        # self.encoder = TorchGRUEncoder(
+        # Hand-written bidirectional GRU (pedagogical reference, swap in to use):
+        # self.encoder = BidirectionalGRU(
         #     self.preprocessor.output_dim, hidden_dim, num_layers, dropout
         # )
 
