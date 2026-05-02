@@ -112,7 +112,9 @@ Summary:
 
 ## Training
 
-Run all variants sequentially (one GPU). Each variant takes ~1 hour on a TITAN X.
+Run all variants sequentially (one GPU). Epoch counts are read automatically from
+`configs/default.yaml` (`num_epochs_by_variant`): A runs 120 epochs (~1 h on TITAN X),
+B/C/D/E run 200 epochs (~1.5 h each).
 
 ```bash
 nohup python src/train.py --variant A --config configs/default.yaml > experiments/variant_A.log 2>&1 &
@@ -128,7 +130,7 @@ nohup python src/train.py --variant E --config configs/default.yaml > experiment
 ```
 
 Run one at a time. Monitor progress with `tail -f experiments/<log_file>`.
-Wait for `Epoch 075` before starting the next variant.
+Wait for the final epoch (A: 120, B/C/D/E: 200) before starting the next variant.
 Checkpoints are written to `experiments/<run_name>/`.
 
 **Tip — multi-GPU:** Set `CUDA_VISIBLE_DEVICES` to assign each variant to a
