@@ -75,8 +75,8 @@ conda create -n lm_decode python=3.9 -y
 conda activate lm_decode
 pip install torch==1.13.1
 
-# 2) Build dependencies (Ubuntu/Debian)
-sudo apt install -y cmake gcc g++ make
+# 2) Build dependencies (use conda if sudo is unavailable)
+conda install -c conda-forge cmake gcc gxx make -y
 
 # 3) Build speechBCI LanguageModelDecoder runtime
 cd ~/speechBCI/LanguageModelDecoder/runtime/server/x86
