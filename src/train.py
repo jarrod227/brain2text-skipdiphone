@@ -117,11 +117,19 @@ def main():
     parser.add_argument("--config",        default="configs/default.yaml")
     parser.add_argument("--variant",       default=None, choices=["A","B","C","D","E"])
     parser.add_argument("--lambda_smooth", default=None, type=float)
+    parser.add_argument("--num_epochs",    default=None, type=int,
+                        help="override number of training epochs")
     args = parser.parse_args()
 
     cfg = OmegaConf.load(args.config)
     variant      = args.variant      or cfg.variant
     lambda_smooth = args.lambda_smooth if args.lambda_smooth is not None else cfg.lambda_smooth
+    if args.num_epochs is not None:
+        num_epochs = args.num_epochs
+    elif "num_epochs_by_variant" in cfg and variant in cfg.num_epochs_by_variant:
+        num_epochs = int(cfg.num_epochs_by_variant[variant])
+    else:
+        num_epochs = int(cfg.num_epochs)
 
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -162,7 +170,7 @@ def main():
             torch.optim.lr_scheduler.LinearLR(
                 optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup),
             torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=cfg.num_epochs - warmup),
+                optimizer, T_max=num_epochs - warmup),
         ],
         milestones=[warmup],
     )
@@ -173,7 +181,8 @@ def main():
 
     best_per = float("inf")
     log = []
-    for epoch in range(1, cfg.num_epochs + 1):
+    print(f"Training variant {variant} for {num_epochs} epochs")
+    for epoch in range(1, num_epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, cfg,
                                  variant, lambda_smooth, device)
         val_loss, val_per = eval_epoch(model, val_loader, cfg,
