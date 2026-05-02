@@ -29,7 +29,7 @@ Five ablation variants are studied:
 
 ## Requirements
 
-- Python 3.9
+- Python 3.11
 - CUDA 11.8+ / cuDNN 8+ recommended
 - GPU: ≥16 GB VRAM (A100, V100, or RTX 3090 all sufficient)
 
@@ -106,7 +106,7 @@ See [data/README.md](data/README.md) for full download and conversion instructio
 Summary:
 1. Download `competitionData.tar.gz` (required, 3.67 GB) and optionally `languageModel.tar.gz` (14.11 GB, for WER) from https://doi.org/10.5061/dryad.x69p8czpq
 2. Convert `.mat` files to `.pkl` using cffan's `formatCompetitionData.ipynb`
-3. Set `data_path: "data/competitionData.pkl"` in `configs/default.yaml`
+3. Place the output at `data/competitionData.pkl` (matches the default `data_path` in `configs/default.yaml`)
 
 ---
 
@@ -125,12 +125,14 @@ nohup python src/train.py --variant C --lambda_smooth 1e-3 --config configs/defa
 nohup python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml > experiments/variant_C_lam5e-3.log 2>&1 &
 nohup python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml > experiments/variant_C_lam1e-2.log 2>&1 &
 
-nohup python src/train.py --variant D --config configs/default.yaml > experiments/variant_D.log 2>&1 &
-nohup python src/train.py --variant E --config configs/default.yaml > experiments/variant_E.log 2>&1 &
+# After C sweep: pick the best lambda_smooth from the logs, then run D/E with it
+nohup python src/train.py --variant D --lambda_smooth <best> --config configs/default.yaml > experiments/variant_D.log 2>&1 &
+nohup python src/train.py --variant E --lambda_smooth <best> --config configs/default.yaml > experiments/variant_E.log 2>&1 &
 ```
 
 Run one at a time. Monitor progress with `tail -f experiments/<log_file>`.
 Wait for the final epoch (A: 120, B/C/D/E: 200) before starting the next variant.
+For variants C/D/E, replace `<best>` with the `lambda_smooth` that gave the lowest PER in the C sweep.
 Checkpoints are written to `experiments/<run_name>/`.
 
 **Tip — multi-GPU:** Set `CUDA_VISIBLE_DEVICES` to assign each variant to a
@@ -159,7 +161,7 @@ python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|
 
 *To be filled after experiments.*
 
-| Variant | PER (3-gram) | WER (3-gram) |
+| Variant | PER (greedy) | WER (3-gram) |
 |---------|-------------|-------------|
 | A | — | — |
 | B | — | — |
