@@ -21,16 +21,14 @@ lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-4, 1e-3, 5
 # Training
 variant: "E"              # ablation variant: A | B | C | D | E
 batch_size: 64
-num_epochs: 75            # fallback if variant-specific epochs are not set
 num_epochs_by_variant:
   A: 120
   B: 200
   C: 200
-  D: 250
-  E: 250
+  D: 200
+  E: 200
 learning_rate: 0.02
-lr_schedule: cosine
-warmup_epochs: 5          # linear warmup; required because lr=0.02 diverges from cold start
+lr_schedule: linear
 grad_clip: 1.0
 seed: 42
 adam_eps: 0.1             # matches cffan; large eps stabilizes Adam at lr=0.02
