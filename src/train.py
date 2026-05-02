@@ -35,10 +35,18 @@ def build_run_name(cfg, variant, lambda_smooth):
 def train_epoch(model, loader, optimizer, cfg, variant, lambda_smooth, device):
     model.train()
     total_loss = 0.0
+    white_noise_sd    = cfg.get("white_noise_sd",    0.8)
+    constant_offset_sd = cfg.get("constant_offset_sd", 0.2)
     for batch in tqdm(loader, leave=False, desc="train"):
         neural   = batch["neural"].to(device)
         lengths  = batch["lengths"].to(device)
         day_ids  = batch["day_ids"].to(device)
+
+        if white_noise_sd > 0:
+            neural = neural + torch.randn_like(neural) * white_noise_sd
+        if constant_offset_sd > 0:
+            neural = neural + torch.randn(neural.shape[0], 1, neural.shape[2],
+                                          device=device) * constant_offset_sd
 
         mono_lp, dip_lp, skip_lp, phone_p, enc_lengths = model(neural, lengths, day_ids)
 
@@ -116,7 +124,13 @@ def main():
         dropout=cfg.encoder.dropout,
     ).to(device)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.learning_rate)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=cfg.learning_rate,
+        betas=(0.9, 0.999),
+        eps=cfg.get("adam_eps", 0.1),
+        weight_decay=cfg.get("weight_decay", 1e-5),
+    )
     # Linear warmup (10% -> 100% of lr over `warmup_epochs`) then cosine annealing.
     # Required because lr=0.02 + 5-layer GRU diverges in the first batch from cold start.
     warmup = cfg.warmup_epochs
