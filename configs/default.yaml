@@ -21,11 +21,11 @@ lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-4, 1e-3, 5
 # Training
 batch_size: 64
 num_epochs_by_variant:
-  A: 120
-  B: 200
-  C: 200
-  D: 200
-  E: 200
+  A: 80
+  B: 120
+  C: 120
+  D: 120
+  E: 120
 learning_rate: 0.02
 grad_clip: 1.0
 seed: 42
