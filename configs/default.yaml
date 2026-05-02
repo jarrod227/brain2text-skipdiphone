@@ -27,7 +27,6 @@ num_epochs_by_variant:
   D: 200
   E: 200
 learning_rate: 0.02
-lr_schedule: linear
 grad_clip: 1.0
 seed: 42
 adam_eps: 0.1             # matches cffan; large eps stabilizes Adam at lr=0.02
