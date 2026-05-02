@@ -12,8 +12,8 @@ Input preprocessing pipeline (matching cffan/neural_seq_decoder):
     -> hand-written bidirectional GRU
 
 Two encoder implementations are provided:
-  - GRUCell / BidirectionalGRU: hand-written (active, used by default)
-  - nn.GRU-based encoder:       commented out below for reference
+  - TorchGRUEncoder (nn.GRU):   cuDNN-accelerated, active by default
+  - BidirectionalGRU:           hand-written reference, commented out
 """
 
 import torch
