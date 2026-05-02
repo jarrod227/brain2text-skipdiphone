@@ -10,7 +10,7 @@ Training objective (Eq. 1 from proposal):
 """
 
 import torch
-import torch.nn as nn
+import torch.nn.functional as F
 
 
 def smoothness_loss(phoneme_probs, lengths):
@@ -55,11 +55,12 @@ def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
     Returns:
         total loss (scalar), dict of component losses for logging
     """
-    # blank is placed at the last index of each head's output
-    # mono:   indices 0–(num_phonemes-1) are phonemes, num_phonemes is blank
-    # diphone/skip: indices 0–(num_diphones-1) are diphones, num_diphones is blank
-    ctc_mono = nn.CTCLoss(blank=num_phonemes,  zero_infinity=True)
-    ctc_dip  = nn.CTCLoss(blank=num_diphones,  zero_infinity=True)
+    # blank sits at the last index: num_phonemes for mono, num_diphones for diphone/skip
+    def ctc_mono(lp, tgt, ilen, tlen):
+        return F.ctc_loss(lp, tgt, ilen, tlen, blank=num_phonemes, zero_infinity=True)
+
+    def ctc_dip(lp, tgt, ilen, tlen):
+        return F.ctc_loss(lp, tgt, ilen, tlen, blank=num_diphones, zero_infinity=True)
 
     components = {}
 
