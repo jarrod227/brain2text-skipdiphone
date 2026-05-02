@@ -126,10 +126,8 @@ def main():
     lambda_smooth = args.lambda_smooth if args.lambda_smooth is not None else cfg.lambda_smooth
     if args.num_epochs is not None:
         num_epochs = args.num_epochs
-    elif "num_epochs_by_variant" in cfg and variant in cfg.num_epochs_by_variant:
-        num_epochs = int(cfg.num_epochs_by_variant[variant])
     else:
-        num_epochs = int(cfg.num_epochs)
+        num_epochs = int(cfg.num_epochs_by_variant[variant])
 
     set_seed(cfg.seed)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -161,18 +159,9 @@ def main():
         eps=cfg.get("adam_eps", 0.1),
         weight_decay=cfg.get("weight_decay", 1e-5),
     )
-    # Linear warmup (10% -> 100% of lr over `warmup_epochs`) then cosine annealing.
-    # Required because lr=0.02 + 5-layer GRU diverges in the first batch from cold start.
-    warmup = cfg.warmup_epochs
-    scheduler = torch.optim.lr_scheduler.SequentialLR(
-        optimizer,
-        schedulers=[
-            torch.optim.lr_scheduler.LinearLR(
-                optimizer, start_factor=0.1, end_factor=1.0, total_iters=warmup),
-            torch.optim.lr_scheduler.CosineAnnealingLR(
-                optimizer, T_max=num_epochs - warmup),
-        ],
-        milestones=[warmup],
+    # Linear decay from lr to 0 over num_epochs, matching cffan/neural_seq_decoder.
+    scheduler = torch.optim.lr_scheduler.LinearLR(
+        optimizer, start_factor=1.0, end_factor=0.0, total_iters=num_epochs
     )
 
     run_name = build_run_name(cfg, variant, lambda_smooth)
