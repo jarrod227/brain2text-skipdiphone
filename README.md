@@ -119,7 +119,6 @@ nohup python src/train.py --variant A --config configs/default.yaml > experiment
 nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
 
 # Variant C: sweep lambda_smooth to find the best value before running D/E
-nohup python src/train.py --variant C --lambda_smooth 1e-4 --config configs/default.yaml > experiments/variant_C_lam1e-4.log 2>&1 &
 nohup python src/train.py --variant C --lambda_smooth 1e-3 --config configs/default.yaml > experiments/variant_C_lam1e-3.log 2>&1 &
 nohup python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml > experiments/variant_C_lam5e-3.log 2>&1 &
 nohup python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml > experiments/variant_C_lam1e-2.log 2>&1 &
