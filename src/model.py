@@ -64,7 +64,7 @@ class InputPreprocessor(nn.Module):
         self.kernel_len  = kernel_len
         self.stride_len  = stride_len
 
-        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=20,
+        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=21,
                                           sigma=gaussian_smooth_width)
 
         # Day-specific linear transform: one (D, D) matrix + (1, D) bias per day
