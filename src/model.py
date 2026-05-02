@@ -64,7 +64,7 @@ class InputPreprocessor(nn.Module):
         self.kernel_len  = kernel_len
         self.stride_len  = stride_len
 
-        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=21,
+        self.smooth = GaussianSmoothing1D(input_dim, kernel_size=20,
                                           sigma=gaussian_smooth_width)
 
         # Day-specific linear transform: one (D, D) matrix + (1, D) bias per day
@@ -223,6 +223,11 @@ class TorchGRUEncoder(nn.Module):
             dropout=dropout if num_layers > 1 else 0.0,
             bidirectional=True,
         )
+        for name, param in self.gru.named_parameters():
+            if "weight_hh" in name:
+                nn.init.orthogonal_(param)
+            if "weight_ih" in name:
+                nn.init.xavier_uniform_(param)
 
     def forward(self, x, lengths):
         packed = nn.utils.rnn.pack_padded_sequence(
