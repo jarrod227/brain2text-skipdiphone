@@ -145,10 +145,10 @@ Check GPU status with `watch -n 1 nvidia-smi`.
 
 ```bash
 # PER only (no LM required)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant E --config configs/default.yaml
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml
 
 # PER + WER with 3-gram LM (run in lm_decode env after compiling speechBCI LM decoder)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant E --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
 ```
 
 ---
