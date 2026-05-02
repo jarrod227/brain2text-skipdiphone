@@ -19,6 +19,7 @@ from tqdm import tqdm
 from dataset import make_dataloader
 from loss import compute_loss
 from model import SkipDiphoneDecoder
+from decode import _ctc_collapse, phoneme_error_rate
 
 
 def set_seed(seed):
@@ -73,6 +74,8 @@ def train_epoch(model, loader, optimizer, cfg, variant, lambda_smooth, device):
 def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
     model.eval()
     total_loss = 0.0
+    per_scores = []
+    blank = model.num_phonemes
     for batch in loader:
         neural   = batch["neural"].to(device)
         lengths  = batch["lengths"].to(device)
@@ -87,7 +90,26 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
             cfg.num_phonemes, cfg.num_diphones,
         )
         total_loss += loss.item()
-    return total_loss / len(loader)
+
+        # Greedy CTC PER: matches decode.py (mono head for A, marginalized for B-E)
+        if variant == "A":
+            log_probs = mono_lp.permute(1, 0, 2)
+        else:
+            log_probs = torch.log(phone_p.clamp(min=1e-10))
+        frame_ids = log_probs.argmax(dim=-1).cpu().tolist()
+        enc_lens_list = enc_lengths.cpu().tolist()
+        ref_phones = batch["targets"]["mono"].cpu().tolist()
+        ref_lens   = batch["target_lengths"]["mono"].cpu().tolist()
+        offset = 0
+        for i in range(len(frame_ids)):
+            hyp = _ctc_collapse(frame_ids[i][:enc_lens_list[i]], blank)
+            ref = ref_phones[offset: offset + ref_lens[i]]
+            per_scores.append(phoneme_error_rate(hyp, ref))
+            offset += ref_lens[i]
+
+    avg_loss = total_loss / len(loader)
+    avg_per  = sum(per_scores) / len(per_scores) if per_scores else float("nan")
+    return avg_loss, avg_per
 
 
 def main():
@@ -149,21 +171,25 @@ def main():
     save_dir = Path(cfg.log_dir) / run_name
     save_dir.mkdir(parents=True, exist_ok=True)
 
-    best_val = float("inf")
+    best_per = float("inf")
     log = []
     for epoch in range(1, cfg.num_epochs + 1):
         train_loss = train_epoch(model, train_loader, optimizer, cfg,
                                  variant, lambda_smooth, device)
-        val_loss   = eval_epoch(model, val_loader, cfg, variant, lambda_smooth, device)
+        val_loss, val_per = eval_epoch(model, val_loader, cfg,
+                                       variant, lambda_smooth, device)
         scheduler.step()
 
-        print(f"Epoch {epoch:03d} | train {train_loss:.4f} | val {val_loss:.4f}")
+        print(f"Epoch {epoch:03d} | train {train_loss:.4f} | "
+              f"val {val_loss:.4f} | PER {val_per*100:.2f}%")
 
-        log.append({"epoch": epoch, "train_loss": train_loss, "val_loss": val_loss})
+        log.append({"epoch": epoch, "train_loss": train_loss,
+                    "val_loss": val_loss, "val_per": val_per})
         (save_dir / "loss.json").write_text(json.dumps(log, indent=2))
 
-        if val_loss < best_val:
-            best_val = val_loss
+        # Select best by PER (matches cffan), not val_loss
+        if val_per < best_per:
+            best_per = val_per
             torch.save(model.state_dict(), save_dir / "best.pt")
 
         if epoch % cfg.save_every == 0:
