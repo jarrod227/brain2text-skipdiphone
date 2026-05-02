@@ -130,7 +130,7 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
         if lm is not None:
             lp_kaldi = _rearrange_for_kaldi(log_probs).cpu().numpy().astype(np.float32)
             log_priors = np.zeros([1, lp_kaldi.shape[-1]], dtype=np.float32)
-            blank_penalty = float(np.log(2.0))
+            blank_penalty = 0.0
             for i, L in enumerate(enc_lengths.cpu().tolist()):
                 decoder_lm.Reset()
                 lm_module.DecodeNumpy(decoder_lm, lp_kaldi[i, :L], log_priors, blank_penalty)
