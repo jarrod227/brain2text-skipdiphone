@@ -32,6 +32,12 @@ def phoneme_error_rate(hyp, ref):
     return editdistance.eval(hyp, ref) / max(len(ref), 1)
 
 
+def phoneme_edit_distance(hyp, ref):
+    hyp = [p for p in hyp if p != SIL_ID]
+    ref = [p for p in ref if p != SIL_ID]
+    return editdistance.eval(hyp, ref), len(ref)
+
+
 def word_error_rate(hyp_text, ref_text):
     hyp = hyp_text.split()
     ref = ref_text.split()
@@ -87,9 +93,13 @@ def _build_lm_decoder(lm_dir):
 
 
 @torch.no_grad()
-def decode(model, loader, device, variant="E", lm=None, lm_dir=None):
+def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
+           report_micro=False, dump_examples=0):
     model.eval()
     per_scores, wer_scores = [], []
+    total_phone_edits = 0
+    total_phone_ref_len = 0
+    dumped = 0
 
     decoder_lm = None
     lm_module = None
@@ -125,6 +135,15 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None):
         for i in range(len(hyp_phones)):
             ref_seq = ref_phones[offset: offset + ref_lens[i]]
             per_scores.append(phoneme_error_rate(hyp_phones[i], ref_seq))
+            edits, rlen = phoneme_edit_distance(hyp_phones[i], ref_seq)
+            total_phone_edits += edits
+            total_phone_ref_len += rlen
+            if dumped < dump_examples:
+                print(
+                    f"[sample {dumped}] ref_len={len(ref_seq)} hyp_len={len(hyp_phones[i])} "
+                    f"ref_head={ref_seq[:20]} hyp_head={hyp_phones[i][:20]}"
+                )
+                dumped += 1
             offset += ref_lens[i]
 
         # === WER: WFST + n-gram LM ===
@@ -143,7 +162,11 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None):
                 wer_scores.append(word_error_rate(hyp_text, ref_text))
 
     mean_per = sum(per_scores) / len(per_scores) if per_scores else float("nan")
+    micro_per = (total_phone_edits / max(total_phone_ref_len, 1)
+                 if total_phone_ref_len > 0 else float("nan"))
     mean_wer = sum(wer_scores) / len(wer_scores) if wer_scores else float("nan")
+    if report_micro:
+        return mean_per, micro_per, mean_wer
     return mean_per, mean_wer
 
 
@@ -164,6 +187,10 @@ def main():
                         help="n-gram LM for WER (requires speechBCI lm_decoder)")
     parser.add_argument("--lm_dir", default=None,
                         help="path to TLG.fst / words.txt (defaults to cfg.lm_dir)")
+    parser.add_argument("--report_micro", action="store_true",
+                        help="also report PER_micro = total_edit_distance / total_ref_phones")
+    parser.add_argument("--dump_examples", default=0, type=int,
+                        help="print first N decoded phone examples (for debugging)")
     parser.add_argument("--config", default="configs/default.yaml")
     args = parser.parse_args()
 
@@ -189,8 +216,15 @@ def main():
     loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
                              num_phonemes=cfg.num_phonemes, shuffle=False)
 
-    per, wer = decode(model, loader, device, variant=variant, lm=args.lm, lm_dir=lm_dir)
+    out = decode(model, loader, device, variant=variant, lm=args.lm, lm_dir=lm_dir,
+                 report_micro=args.report_micro, dump_examples=args.dump_examples)
+    if args.report_micro:
+        per, per_micro, wer = out
+    else:
+        per, wer = out
     print(f"PER: {per * 100:.2f}%")
+    if args.report_micro:
+        print(f"PER_micro: {per_micro * 100:.2f}%")
     if args.lm is not None:
         print(f"WER: {wer * 100:.2f}%")
 

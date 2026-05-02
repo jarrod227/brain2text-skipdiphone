@@ -62,6 +62,41 @@ git clone https://github.com/fwillett/speechBCI.git
 # Follow speechBCI/LanguageModelDecoder/README.md to compile and install KenLM
 ```
 
+### Optional: separate LM decode environment (recommended for WER)
+
+`--lm` decoding depends on `speechBCI/LanguageModelDecoder` Python bindings (`lm_decoder`),
+which are often easiest to compile/run in a separate environment from training.
+This project was trained in `b2t` (PyTorch >=2.1), while LM decoding was validated
+in a separate `lm_decode` env with PyTorch 1.13.1.
+
+```bash
+# 1) Create dedicated env for LM decode
+conda create -n lm_decode python=3.9 -y
+conda activate lm_decode
+pip install torch==1.13.1
+
+# 2) Build dependencies (Ubuntu/Debian)
+sudo apt install -y cmake gcc g++ make
+
+# 3) Build speechBCI LanguageModelDecoder runtime
+cd ~/speechBCI/LanguageModelDecoder/runtime/server/x86
+mkdir -p build && cd build
+cmake ..
+make -j8
+cd ..
+
+# 4) Install Python bindings
+python setup.py install
+pip install editdistance omegaconf "numpy<2"
+
+# 5) Verify
+python -c "import lm_decoder; print('lm_decoder import OK')"
+```
+
+If `lm_decoder` import fails or `--lm` crashes, re-check that the runtime was built
+inside the currently activated environment and that `data/languageModel/` contains
+`TLG.fst` and `words.txt`.
+
 ---
 
 ## Data
@@ -110,10 +145,13 @@ Check GPU status with `watch -n 1 nvidia-smi`.
 
 ```bash
 # PER only (no LM required)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --config configs/default.yaml
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml
 
-# PER + WER with 3-gram LM (requires speechBCI LanguageModelDecoder)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --config configs/default.yaml --lm 3gram
+# PER + WER with 3-gram LM (run in lm_decode env after compiling speechBCI LM decoder)
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
+
+# Debug high PER: print both PER (macro) and PER_micro, plus sample predictions
+python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml --report_micro --dump_examples 5
 ```
 
 ---
