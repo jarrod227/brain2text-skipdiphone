@@ -91,12 +91,15 @@ def decode(model, loader, device, variant="E", lm=None):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
+    parser.add_argument("--variant", default=None, choices=["A","B","C","D","E"],
+                        help="ablation variant (default: read from config)")
     parser.add_argument("--lm",    default=None, choices=["3gram", "5gram"],
                         help="n-gram LM for WER (optional; requires speechBCI LM decoder)")
     parser.add_argument("--config", default="configs/default.yaml")
     args = parser.parse_args()
 
     cfg    = OmegaConf.load(args.config)
+    variant = args.variant or cfg.variant
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = SkipDiphoneDecoder(
@@ -116,7 +119,7 @@ def main():
     loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
                              num_phonemes=cfg.num_phonemes, shuffle=False)
 
-    per, wer = decode(model, loader, device, variant=cfg.variant, lm=args.lm)
+    per, wer = decode(model, loader, device, variant=variant, lm=args.lm)
     print(f"PER: {per * 100:.2f}%")
     if args.lm is not None:
         print(f"WER: {wer * 100:.2f}%")
