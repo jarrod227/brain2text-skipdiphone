@@ -1,6 +1,9 @@
 """
 Decode a trained checkpoint and report PER (greedy CTC) and WER (with LM).
 
+PER follows cffan/neural_seq_decoder convention: micro edit-distance over all
+phonemes including SIL, only CTC blank removed from the hypothesis.
+
 Usage:
     # PER only (no LM)  — runs in the b2t training env
     python src/decode.py --checkpoint experiments/<run>/best.pt --variant A
@@ -23,21 +26,6 @@ from dataset import make_dataloader
 from model import SkipDiphoneDecoder
 
 
-SIL_ID = 39  # silence phoneme; excluded from PER following cffan convention
-
-
-def phoneme_error_rate(hyp, ref):
-    hyp = [p for p in hyp if p != SIL_ID]
-    ref = [p for p in ref if p != SIL_ID]
-    return editdistance.eval(hyp, ref) / max(len(ref), 1)
-
-
-def phoneme_edit_distance(hyp, ref):
-    hyp = [p for p in hyp if p != SIL_ID]
-    ref = [p for p in ref if p != SIL_ID]
-    return editdistance.eval(hyp, ref), len(ref)
-
-
 def word_error_rate(hyp_text, ref_text):
     hyp = hyp_text.split()
     ref = ref_text.split()
@@ -45,7 +33,7 @@ def word_error_rate(hyp_text, ref_text):
 
 
 def _ctc_collapse(frame_ids, blank):
-    """Collapse consecutive duplicate tokens then remove blank."""
+    """Collapse consecutive duplicates then remove blank."""
     collapsed = []
     prev = None
     for t in frame_ids:
@@ -58,8 +46,8 @@ def _ctc_collapse(frame_ids, blank):
 def _rearrange_for_kaldi(log_probs):
     """
     Reorder the last dim from our model layout to the Kaldi/LM layout.
-        Ours:  [phone_0, phone_1, ..., phone_38=ZH, phone_39=SIL, blank]
-        Kaldi: [blank, SIL, phone_0, phone_1, ..., phone_38=ZH]
+        Ours:  [phone_0, ..., phone_38=ZH, phone_39=SIL, blank]
+        Kaldi: [blank, SIL, phone_0, ..., phone_38=ZH]
     Equivalent to speechBCI's rearrange_speech_logits(has_sil=True).
     """
     blank  = log_probs[..., -1:]
@@ -84,8 +72,8 @@ def _build_lm_decoder(lm_dir):
     lm_path = Path(lm_dir)
     resource = lm_decoder.DecodeResource(
         str(lm_path / "TLG.fst"),
-        "",                              # G.fst (optional, for lattice rescoring)
-        "",                              # G_no_prune.fst (optional)
+        "",
+        "",
         str(lm_path / "words.txt"),
         "",
     )
@@ -94,11 +82,11 @@ def _build_lm_decoder(lm_dir):
 
 @torch.no_grad()
 def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
-           report_micro=False, dump_examples=0):
+           dump_examples=0):
     model.eval()
-    per_scores, wer_scores = [], []
-    total_phone_edits = 0
-    total_phone_ref_len = 0
+    total_edits = 0
+    total_ref_len = 0
+    wer_scores = []
     dumped = 0
 
     decoder_lm = None
@@ -116,33 +104,25 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
 
         mono_lp, _, _, phoneme_probs, enc_lengths = model(neural, lengths, day_ids)
 
-        # Get per-frame log-probs (B, T', C+1) for both PER and LM decode.
-        # A: read from the mono CTC head (already log-softmax).
-        # B-E: convert marginalized phoneme probs back to log-domain.
         if variant == "A":
             log_probs = mono_lp.permute(1, 0, 2)
         else:
             log_probs = torch.log(phoneme_probs.clamp(min=1e-10))
 
-        # === PER: greedy CTC ===
-        frame_ids = log_probs.argmax(dim=-1).cpu().tolist()
+        # === PER: greedy CTC, micro accumulation, no SIL filter (cffan convention) ===
+        frame_ids  = log_probs.argmax(dim=-1).cpu().tolist()
         hyp_phones = [_ctc_collapse(seq[:L], blank)
                       for seq, L in zip(frame_ids, enc_lengths.cpu().tolist())]
 
         ref_phones = batch["targets"]["mono"].cpu().tolist()
         ref_lens   = batch["target_lengths"]["mono"].cpu().tolist()
         offset = 0
-        for i in range(len(hyp_phones)):
-            ref_seq = ref_phones[offset: offset + ref_lens[i]]
-            per_scores.append(phoneme_error_rate(hyp_phones[i], ref_seq))
-            edits, rlen = phoneme_edit_distance(hyp_phones[i], ref_seq)
-            total_phone_edits += edits
-            total_phone_ref_len += rlen
+        for i, hyp in enumerate(hyp_phones):
+            ref = ref_phones[offset: offset + ref_lens[i]]
+            total_edits   += editdistance.eval(hyp, ref)
+            total_ref_len += len(ref)
             if dumped < dump_examples:
-                print(
-                    f"[sample {dumped}] ref_len={len(ref_seq)} hyp_len={len(hyp_phones[i])} "
-                    f"ref_head={ref_seq[:20]} hyp_head={hyp_phones[i][:20]}"
-                )
+                print(f"[sample {dumped}] ref={ref[:20]} hyp={hyp[:20]}")
                 dumped += 1
             offset += ref_lens[i]
 
@@ -151,23 +131,17 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
             lp_kaldi = _rearrange_for_kaldi(log_probs).cpu().numpy().astype(np.float32)
             log_priors = np.zeros([1, lp_kaldi.shape[-1]], dtype=np.float32)
             blank_penalty = float(np.log(2.0))
-
             for i, L in enumerate(enc_lengths.cpu().tolist()):
                 decoder_lm.Reset()
                 lm_module.DecodeNumpy(decoder_lm, lp_kaldi[i, :L], log_priors, blank_penalty)
                 decoder_lm.FinishDecoding()
                 results = decoder_lm.result()
                 hyp_text = results[0].sentence.strip() if results else ""
-                ref_text = batch["transcripts"][i].strip()
-                wer_scores.append(word_error_rate(hyp_text, ref_text))
+                wer_scores.append(word_error_rate(hyp_text, batch["transcripts"][i].strip()))
 
-    mean_per = sum(per_scores) / len(per_scores) if per_scores else float("nan")
-    micro_per = (total_phone_edits / max(total_phone_ref_len, 1)
-                 if total_phone_ref_len > 0 else float("nan"))
-    mean_wer = sum(wer_scores) / len(wer_scores) if wer_scores else float("nan")
-    if report_micro:
-        return mean_per, micro_per, mean_wer
-    return mean_per, mean_wer
+    per = total_edits / max(total_ref_len, 1)
+    wer = sum(wer_scores) / len(wer_scores) if wer_scores else float("nan")
+    return per, wer
 
 
 def _load_checkpoint(path, device):
@@ -181,23 +155,19 @@ def _load_checkpoint(path, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checkpoint", required=True)
-    parser.add_argument("--variant", default=None, choices=["A","B","C","D","E"],
-                        help="ablation variant (default: read from config)")
+    parser.add_argument("--variant", required=True, choices=["A","B","C","D","E"])
     parser.add_argument("--lm",     default=None, choices=["3gram", "5gram"],
                         help="n-gram LM for WER (requires speechBCI lm_decoder)")
     parser.add_argument("--lm_dir", default=None,
                         help="path to TLG.fst / words.txt (defaults to cfg.lm_dir)")
-    parser.add_argument("--report_micro", action="store_true",
-                        help="also report PER_micro = total_edit_distance / total_ref_phones")
     parser.add_argument("--dump_examples", default=0, type=int,
-                        help="print first N decoded phone examples (for debugging)")
+                        help="print first N decoded examples for debugging")
     parser.add_argument("--config", default="configs/default.yaml")
     args = parser.parse_args()
 
-    cfg     = OmegaConf.load(args.config)
-    variant = args.variant or cfg.variant
-    lm_dir  = args.lm_dir or cfg.lm_dir
-    device  = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cfg    = OmegaConf.load(args.config)
+    lm_dir = args.lm_dir or cfg.lm_dir
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     model = SkipDiphoneDecoder(
         input_dim=cfg.encoder.input_dim,
@@ -216,15 +186,9 @@ def main():
     loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
                              num_phonemes=cfg.num_phonemes, shuffle=False)
 
-    out = decode(model, loader, device, variant=variant, lm=args.lm, lm_dir=lm_dir,
-                 report_micro=args.report_micro, dump_examples=args.dump_examples)
-    if args.report_micro:
-        per, per_micro, wer = out
-    else:
-        per, wer = out
+    per, wer = decode(model, loader, device, variant=args.variant,
+                      lm=args.lm, lm_dir=lm_dir, dump_examples=args.dump_examples)
     print(f"PER: {per * 100:.2f}%")
-    if args.report_micro:
-        print(f"PER_micro: {per_micro * 100:.2f}%")
     if args.lm is not None:
         print(f"WER: {wer * 100:.2f}%")
 
