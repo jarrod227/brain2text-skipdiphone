@@ -21,7 +21,7 @@ lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-4, 1e-3, 5
 # Training
 variant: "E"              # ablation variant: A | B | C | D | E
 batch_size: 64
-num_epochs: 50
+num_epochs: 75
 learning_rate: 0.02
 lr_schedule: cosine
 warmup_epochs: 5          # linear warmup; required because lr=0.02 diverges from cold start
