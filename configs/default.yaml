@@ -19,7 +19,6 @@ beta: 0.1                 # weight for skip-diphone auxiliary CTC loss (small by
 lambda_smooth: 1.0e-3     # temporal smoothness weight; sweep: [0, 1e-4, 1e-3, 5e-3, 1e-2]
 
 # Training
-variant: "E"              # ablation variant: A | B | C | D | E
 batch_size: 64
 num_epochs_by_variant:
   A: 120
