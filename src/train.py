@@ -115,14 +115,14 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config",        default="configs/default.yaml")
-    parser.add_argument("--variant",       default=None, choices=["A","B","C","D","E"])
+    parser.add_argument("--variant",       required=True, choices=["A","B","C","D","E"])
     parser.add_argument("--lambda_smooth", default=None, type=float)
     parser.add_argument("--num_epochs",    default=None, type=int,
                         help="override number of training epochs")
     args = parser.parse_args()
 
     cfg = OmegaConf.load(args.config)
-    variant      = args.variant      or cfg.variant
+    variant      = args.variant
     lambda_smooth = args.lambda_smooth if args.lambda_smooth is not None else cfg.lambda_smooth
     if args.num_epochs is not None:
         num_epochs = args.num_epochs
