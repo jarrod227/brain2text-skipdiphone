@@ -11,6 +11,7 @@ import json
 import random
 from pathlib import Path
 
+import editdistance
 import numpy as np
 import torch
 from omegaconf import OmegaConf
@@ -19,7 +20,7 @@ from tqdm import tqdm
 from dataset import make_dataloader
 from loss import compute_loss
 from model import SkipDiphoneDecoder
-from decode import _ctc_collapse, phoneme_error_rate
+from decode import _ctc_collapse
 
 
 def set_seed(seed):
@@ -73,8 +74,9 @@ def train_epoch(model, loader, optimizer, cfg, variant, lambda_smooth, device):
 @torch.no_grad()
 def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
     model.eval()
-    total_loss = 0.0
-    per_scores = []
+    total_loss    = 0.0
+    total_edits   = 0
+    total_ref_len = 0
     blank = model.num_phonemes
     for batch in loader:
         neural   = batch["neural"].to(device)
@@ -91,7 +93,7 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
         )
         total_loss += loss.item()
 
-        # Greedy CTC PER: matches decode.py (mono head for A, marginalized for B-E)
+        # Greedy CTC PER: micro, no SIL filter — matches cffan/neural_seq_decoder
         if variant == "A":
             log_probs = mono_lp.permute(1, 0, 2)
         else:
@@ -104,11 +106,12 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
         for i in range(len(frame_ids)):
             hyp = _ctc_collapse(frame_ids[i][:enc_lens_list[i]], blank)
             ref = ref_phones[offset: offset + ref_lens[i]]
-            per_scores.append(phoneme_error_rate(hyp, ref))
+            total_edits   += editdistance.eval(hyp, ref)
+            total_ref_len += len(ref)
             offset += ref_lens[i]
 
     avg_loss = total_loss / len(loader)
-    avg_per  = sum(per_scores) / len(per_scores) if per_scores else float("nan")
+    avg_per  = total_edits / max(total_ref_len, 1)
     return avg_loss, avg_per
 
 
@@ -185,7 +188,6 @@ def main():
                     "val_loss": val_loss, "val_per": val_per})
         (save_dir / "loss.json").write_text(json.dumps(log, indent=2))
 
-        # Select best by PER (matches cffan), not val_loss
         if val_per < best_per:
             best_per = val_per
             torch.save(model.state_dict(), save_dir / "best.pt")
