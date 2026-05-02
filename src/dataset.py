@@ -58,6 +58,7 @@ class BrainToTextDataset(Dataset):
                     "mono":         torch.tensor(phones,   dtype=torch.long),
                     "diphone":      torch.tensor(diphones, dtype=torch.long),
                     "skip_diphone": torch.tensor(skip_dip, dtype=torch.long),
+                    "transcript":   str(day_data["transcriptions"][i]).strip(),
                 })
 
                 if debug_subset and len(samples) >= 200:
@@ -100,6 +101,7 @@ def collate_fn(batch):
         "neural":   neural_padded,
         "lengths":  lengths,
         "day_ids":  day_ids,
+        "transcripts": [s["transcript"] for s in batch],
         "targets": {
             "mono":         torch.cat(mono),
             "diphone":      torch.cat(diphone),
