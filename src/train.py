@@ -162,9 +162,9 @@ def main():
         eps=cfg.adam_eps,
         weight_decay=cfg.weight_decay,
     )
-    # Linear decay from lr to 0 over num_epochs, matching cffan/neural_seq_decoder.
+    # Constant LR, matching cffan/neural_seq_decoder (lrStart == lrEnd == 0.02).
     scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=1.0, end_factor=0.0, total_iters=num_epochs
+        optimizer, start_factor=1.0, end_factor=1.0, total_iters=num_epochs
     )
 
     run_name = build_run_name(cfg, variant, lambda_smooth)
