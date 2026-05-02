@@ -27,6 +27,10 @@ lr_schedule: cosine
 warmup_epochs: 5          # linear warmup; required because lr=0.02 diverges from cold start
 grad_clip: 1.0
 seed: 42
+adam_eps: 0.1             # matches cffan; large eps stabilizes Adam at lr=0.02
+weight_decay: 1.0e-5      # L2 regularization, matches cffan
+white_noise_sd: 0.8       # data augmentation: per-frame white noise (matches cffan)
+constant_offset_sd: 0.2   # data augmentation: per-trial constant offset (matches cffan)
 
 # Data
 data_path: "data/competitionData.pkl"  # output of formatCompetitionData.ipynb
