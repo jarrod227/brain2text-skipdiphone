@@ -114,11 +114,8 @@ python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E
     --config configs/default.yaml --lm 3gram --lm_dir data/languageModel \
     --nbest 100 --save_nbest experiments/<run>/nbest.pkl
 
-# Step 2: rescore and sweep alpha
+# Step 2: rescore with GPT-2
 python src/rescore.py --nbest experiments/<run>/nbest.pkl
-
-# Step 3: fix best alpha
-python src/rescore.py --nbest experiments/<run>/nbest.pkl --alpha <best>
 ```
 
 Note: n-gram-only WER is ~50%; GPT-2 rescoring brings it to ~25–30%.
