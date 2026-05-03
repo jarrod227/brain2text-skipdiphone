@@ -52,9 +52,9 @@ def rescore_with_alpha(nbest_outputs, transcripts, gpt2_model, gpt2_tok, alpha, 
         best_score = -1e18
         best_hyp = ""
         for r in results:
-            hyp = r.sentence.strip()
+            hyp = r["sentence"]
             gpt2_s = gpt2_log_prob(gpt2_model, gpt2_tok, hyp, device)
-            combined = r.score + alpha * gpt2_s
+            combined = r["score"] + alpha * gpt2_s
             if combined > best_score:
                 best_score = combined
                 best_hyp = hyp
