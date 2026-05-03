@@ -125,14 +125,15 @@ nohup python src/train.py --variant C --lambda_smooth 1e-3 --config configs/defa
 nohup python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml > experiments/variant_C_lam5e-3.log 2>&1 &
 nohup python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml > experiments/variant_C_lam1e-2.log 2>&1 &
 
-# After C sweep: pick the best lambda_smooth from the logs, then run D/E with it
-nohup python src/train.py --variant D --lambda_smooth <best> --config configs/default.yaml > experiments/variant_D.log 2>&1 &
+# After C sweep: pick the best lambda_smooth, then run D and E
+# D does not use smoothness loss; lambda_smooth only applies to E
+nohup python src/train.py --variant D --config configs/default.yaml > experiments/variant_D.log 2>&1 &
 nohup python src/train.py --variant E --lambda_smooth <best> --config configs/default.yaml > experiments/variant_E.log 2>&1 &
 ```
 
 Run one at a time. Monitor progress with `tail -f experiments/<log_file>`.
 Wait for the final epoch (A: 80, B/C/D/E: 120) before starting the next variant.
-For variants C/D/E, replace `<best>` with the `lambda_smooth` that gave the lowest PER in the C sweep.
+For variant E, replace `<best>` with the `lambda_smooth` that gave the lowest PER in the C sweep.
 Checkpoints are written to `experiments/<run_name>/`.
 
 **Tip — multi-GPU:** Set `CUDA_VISIBLE_DEVICES` to assign each variant to a
@@ -151,7 +152,9 @@ Check GPU status with `watch -n 1 nvidia-smi`.
 # PER only (no LM required)
 python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml
 
-# PER + WER with 3-gram LM (run in lm_decode env after compiling speechBCI LM decoder)
+# PER + WER with n-gram LM (run in lm_decode env after compiling speechBCI LM decoder)
+# Note: WER is n-gram only (no LLM rescoring). cffan's ~23% WER uses additional
+# GPT-2 rescoring over 100-best hypotheses, which is not reproduced here.
 python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
 ```
 
