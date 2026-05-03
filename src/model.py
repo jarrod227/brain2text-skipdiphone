@@ -132,20 +132,55 @@ class GRUCell(nn.Module):
         self.U_zr = nn.Linear(hidden_dim, 2 * hidden_dim, bias=False)
         self.U_n  = nn.Linear(hidden_dim,     hidden_dim, bias=False)
 
-    def forward(self, x, h):
-        """
-        x: (B, input_dim)
-        h: (B, hidden_dim)
-        returns h_new: (B, hidden_dim)
-        """
-        W_z, W_r, W_n = self.W(x).chunk(3, dim=-1)
-        U_z, U_r      = self.U_zr(h).chunk(2, dim=-1)
+def forward(self, x, lengths, day_ids, return_logits=False):
+    """
+    Args:
+        x:       (B, T, input_dim)
+        lengths: (B,) actual sequence lengths before padding
+        day_ids: (B,) integer recording-day index per sample
+        return_logits: if True, also return raw mono/diphone/skip logits for LM decoding
 
-        z = torch.sigmoid(W_z + U_z)
-        r = torch.sigmoid(W_r + U_r)
-        n = torch.tanh(W_n + self.U_n(r * h))
+    Returns:
+        mono_log_probs:    (T', B, num_phonemes+1)
+        diphone_log_probs: (T', B, num_diphones+1)
+        skip_log_probs:    (T', B, num_diphones+1)
+        phoneme_probs:     (B, T', num_phonemes+1)
+        enc_lengths:       (B,)
 
-        return (1 - z) * h + z * n
+        if return_logits=True, also returns:
+        mono_logits:       (B, T', num_phonemes+1)
+        diphone_logits:    (B, T', num_diphones+1)
+        skip_logits:       (B, T', num_diphones+1)
+    """
+    x, enc_lengths = self.preprocessor(x, day_ids, lengths)   # (B, T', D*K)
+    enc_out = self.encoder(x, enc_lengths)                    # (B, T', 2H)
+
+    # Raw logits: important for WFST / LM decoding.
+    # Official speechBCI pipeline feeds raw logits to lm_decoder, not log_probs.
+    mono_logits = self.mono_head(enc_out)
+    diphone_logits = self.diphone_head(enc_out)
+    skip_logits = self.skip_head(enc_out)
+
+    mono_log_probs = F.log_softmax(mono_logits, dim=-1).permute(1, 0, 2)
+    diphone_log_probs = F.log_softmax(diphone_logits, dim=-1).permute(1, 0, 2)
+    skip_log_probs = F.log_softmax(skip_logits, dim=-1).permute(1, 0, 2)
+
+    # Still use normalized marginalized phoneme probabilities for PER and smoothness loss.
+    phoneme_probs = self._marginalize(diphone_log_probs.permute(1, 0, 2))
+
+    if return_logits:
+        return (
+            mono_log_probs,
+            diphone_log_probs,
+            skip_log_probs,
+            phoneme_probs,
+            enc_lengths,
+            mono_logits,
+            diphone_logits,
+            skip_logits,
+        )
+
+    return mono_log_probs, diphone_log_probs, skip_log_probs, phoneme_probs, enc_lengths
 
 
 class BidirectionalGRU(nn.Module):
