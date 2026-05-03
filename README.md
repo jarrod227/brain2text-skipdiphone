@@ -1,7 +1,7 @@
 # Brain-to-Text: Skip-Diphone Auxiliary Supervision and Temporal Smoothness Regularization
 
 Course project extending [DCoND](https://arxiv.org/abs/2411.10657) with:
-(i) a **skip-diphone auxiliary head** (z_{t-2}→z_t), and
+(i) a **skip-diphone auxiliary head** (`z_{t-2} → z_t`), and
 (ii) a **temporal smoothness loss** on marginalized phoneme probabilities.
 
 See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation plan.
@@ -13,37 +13,49 @@ See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation pl
 | Variant | Description |
 |---------|-------------|
 | A | GRU + monophone CTC (NPTL baseline) |
-| B | GRU + diphone CTC + marginalization (DCoND) |
+| B | GRU + diphone CTC + marginalization (DCoND-style baseline) |
 | C | B + temporal smoothness loss |
 | D | B + skip-diphone auxiliary head |
-| E | B + skip-diphone + smoothness (full model) |
+| E | B + skip-diphone + temporal smoothness loss (full model) |
 
 ---
 
 ## Requirements
 
-- Python 3.11, CUDA 11.8+, ≥16 GB VRAM
+- Python 3.11
+- CUDA 11.8+
+- ≥16 GB VRAM recommended
 
 ---
 
 ## Installation
 
 ```bash
-conda create -n b2t python=3.11 && conda activate b2t
+conda create -n b2t python=3.11 -y
+conda activate b2t
+
 pip install torch --index-url https://download.pytorch.org/whl/cu118
 pip install -r requirements.txt
 ```
 
-### LM decode environment (for WER)
+### LM decode environment for WER
+
+WER decoding uses the official `speechBCI` WFST language-model decoder.
 
 ```bash
-conda create -n lm_decode python=3.9 -y && conda activate lm_decode
+conda create -n lm_decode python=3.9 -y
+conda activate lm_decode
+
 pip install torch==1.13.1
 conda install -c conda-forge cmake gcc gxx make -y
 
 git clone https://github.com/fwillett/speechBCI.git
 cd ~/speechBCI/LanguageModelDecoder/runtime/server/x86
-mkdir -p build && cd build && cmake .. && make -j8 && cd ..
+mkdir -p build
+cd build
+cmake ..
+make -j8
+cd ..
 python setup.py install
 
 pip install editdistance omegaconf "numpy<2" transformers
@@ -54,86 +66,192 @@ python -c "import lm_decoder; print('OK')"
 
 ## Data
 
-1. Download `competitionData.tar.gz` from https://doi.org/10.5061/dryad.x69p8czpq
-2. Convert with cffan's `formatCompetitionData.ipynb`
-3. Place at `data/competitionData.pkl`
+1. Download `competitionData.tar.gz` from: https://doi.org/10.5061/dryad.x69p8czpq
+2. Convert it with cffan's `formatCompetitionData.ipynb`.
+3. Place the converted file at:
 
-For WER: also download `languageModel.tar.gz` and extract to `data/languageModel/`.
+```bash
+data/competitionData.pkl
+```
+
+For WER decoding, also download `languageModel.tar.gz` and extract it to:
+
+```bash
+data/languageModel/
+```
+
+Expected structure:
+
+```text
+data/
+├── competitionData.pkl
+└── languageModel/
+    ├── TLG.fst
+    ├── words.txt
+    └── ...
+```
 
 ---
 
 ## Training
 
-A runs 80 epochs (~40 min on TITAN X); B/C/D/E run 120–150 epochs (~1 h each).
+Variant A runs 80 epochs. Variants B/C/D/E run 120–150 epochs.
 
 ```bash
-# Variant A (baseline)
-nohup python src/train.py --variant A --config configs/default.yaml > experiments/variant_A.log 2>&1 &
+# Variant A: monophone baseline
+nohup python src/train.py \
+  --variant A \
+  --config configs/default.yaml \
+  > experiments/variant_A.log 2>&1 &
 
-# Variant B
-nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
+# Variant B: diphone baseline
+nohup python src/train.py \
+  --variant B \
+  --config configs/default.yaml \
+  > experiments/variant_B.log 2>&1 &
 
-# Variant C: sweep lambda_smooth
+# Variant C: diphone + smoothness
 for lam in 1e-3 5e-3 1e-2; do
-  nohup python src/train.py --variant C --lambda_smooth $lam --config configs/default.yaml \
+  nohup python src/train.py \
+    --variant C \
+    --lambda_smooth $lam \
+    --config configs/default.yaml \
     > experiments/variant_C_lam${lam}.log 2>&1 &
 done
 
-# Variants D and E (use best lambda_smooth from C sweep for E)
-nohup python src/train.py --variant D --config configs/default.yaml > experiments/variant_D.log 2>&1 &
-nohup python src/train.py --variant E --lambda_smooth <best> --config configs/default.yaml > experiments/variant_E.log 2>&1 &
+# Variant D: diphone + skip-diphone
+nohup python src/train.py \
+  --variant D \
+  --config configs/default.yaml \
+  > experiments/variant_D.log 2>&1 &
+
+# Variant E: full model
+nohup python src/train.py \
+  --variant E \
+  --lambda_smooth 5e-3 \
+  --config configs/default.yaml \
+  > experiments/variant_E_lam5e-3.log 2>&1 &
 ```
 
-Monitor: `tail -f experiments/<log_file>`. Multi-GPU: prefix with `CUDA_VISIBLE_DEVICES=N`.
+Monitor training:
+
+```bash
+tail -f experiments/<log_file>
+```
+
+For multi-GPU systems, prefix commands with:
+
+```bash
+CUDA_VISIBLE_DEVICES=<gpu_id>
+```
 
 ---
 
 ## Evaluation
 
-### PER (greedy CTC)
+### PER: greedy CTC
+
+PER is computed on the test split using greedy CTC decoding.
+
+For Variant A, decoding uses the monophone head directly.  
+For Variants B–E, diphone outputs are marginalized to phoneme probabilities before CTC collapse.
 
 ```bash
-python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E> \
-    --config configs/default.yaml
+python src/decode.py \
+  --checkpoint experiments/<run>/best.pt \
+  --variant <A|B|C|D|E> \
+  --config configs/default.yaml
 ```
 
-### WER with n-gram LM
+---
 
-Run in `lm_decode` env:
+### WER with 3-gram LM
+
+Run this in the `lm_decode` environment.
+
+For fair comparison, all variants are decoded using the same LM settings:
+
+```text
+acoustic_scale = 0.8
+beam = 18
+blank_penalty = log(7)
+```
+
+No per-variant decoding-parameter tuning is used.
 
 ```bash
-python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E> \
-    --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
+python src/decode.py \
+  --checkpoint experiments/<run>/best.pt \
+  --variant <A|B|C|D|E> \
+  --config configs/default.yaml \
+  --lm 3gram \
+  --lm_dir data/languageModel \
+  --acoustic_scale 0.8 \
+  --beam 18 \
+  --blank_penalty 1.9459
 ```
+
+Implementation note: WER decoding uses raw acoustic logits, matching the official `speechBCI` inference style. For diphone-based variants, raw diphone logits are marginalized to phoneme-level logits using log-sum-exp before Kaldi/WFST decoding.
+
+---
 
 ### WER with GPT-2 rescoring
 
-```bash
-# Step 1: generate 100-best (lm_decode env)
-python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E> \
-    --config configs/default.yaml --lm 3gram --lm_dir data/languageModel \
-    --nbest 100 --save_nbest experiments/<run>/nbest.pkl
+Step 1: generate 100-best hypotheses with the 3-gram LM.
 
-# Step 2: rescore with GPT-2
-python src/rescore.py --nbest experiments/<run>/nbest.pkl
+```bash
+python src/decode.py \
+  --checkpoint experiments/<run>/best.pt \
+  --variant <A|B|C|D|E> \
+  --config configs/default.yaml \
+  --lm 3gram \
+  --lm_dir data/languageModel \
+  --acoustic_scale 0.8 \
+  --beam 18 \
+  --blank_penalty 1.9459 \
+  --nbest 100 \
+  --save_nbest experiments/<run>/nbest.pkl
 ```
 
-Note: n-gram-only WER is ~50%; GPT-2 rescoring brings it to ~25–30%.
-cffan's published ~23% WER uses OPT-6B rescoring on the competition partition.
+Step 2: rescore the 100-best hypotheses with GPT-2.
+
+```bash
+python src/rescore.py \
+  --nbest experiments/<run>/nbest.pkl
+```
+
+GPT-2 rescoring is included as an optional post-processing experiment. The main ablation comparison should use the same fixed 3-gram LM decoding settings for all variants.
 
 ---
 
 ## Results
 
-*To be filled after experiments.*
+Current acoustic decoding results on the test split:
 
-| Variant | PER (greedy) | WER (n-gram) | WER (GPT-2) |
-|---------|-------------|-------------|-------------|
-| A | — | — | — |
-| B | — | — | — |
-| C | — | — | — |
-| D | — | — | — |
-| E | — | — | — |
+| Rank | Variant | Core setting | Best PER (greedy) | 3-gram WER | Notes |
+|------|---------|--------------|------------------:|-----------:|-------|
+| 1 | E | Skip-diphone + smoothness, λ=0.005 | 19.20% | TBD | Best acoustic model, epoch 143 |
+| 2 | D | Skip-diphone, λ=0.001 | 19.50% | TBD | Skip-diphone auxiliary supervision |
+| 3 | C | Diphone + smoothness, λ=0.01 | 19.58% | TBD | High smoothness weight, epoch 114 |
+| 4 | C | Diphone + smoothness, λ=0.005 | 19.63% | TBD |  |
+| 5 | B | Diphone baseline | 19.64% | TBD |  |
+| 6 | C | Diphone + smoothness, λ=0.001 | 19.67% | TBD |  |
+| 7 | A | Monophone CTC baseline | 20.94% | TBD | Acoustic baseline |
+
+Variant E improves PER from 20.94% to 19.20%, corresponding to a 1.74 absolute-point reduction and an 8.3% relative reduction over the monophone baseline.
+
+WER results are being re-evaluated after updating the LM decoding path to use raw acoustic logits instead of normalized log probabilities.
+
+---
+
+## Notes on Fair Comparison
+
+This project reports two types of metrics:
+
+1. **PER**, which evaluates the acoustic neural-to-phoneme model directly.
+2. **WER**, which evaluates the full decoding pipeline with a language model.
+
+For fair A/B/C/D/E comparison, all variants should use the same WER decoding parameters. This avoids giving one variant an unfair advantage through per-model decoder tuning.
 
 ---
 
