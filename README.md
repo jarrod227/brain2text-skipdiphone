@@ -149,7 +149,7 @@ CUDA_VISIBLE_DEVICES=<gpu_id>
 
 ## Evaluation
 
-### PER: greedy CTC
+### Quick acoustic evaluation: PER only
 
 PER is computed on the test split using greedy CTC decoding.
 
@@ -165,7 +165,7 @@ python src/decode.py \
 
 ---
 
-### WER with 3-gram LM
+### Full decoding evaluation: PER + 3-gram WER
 
 Run this in the `lm_decode` environment.
 
@@ -230,7 +230,7 @@ Current acoustic decoding results on the test split:
 
 | Rank | Variant | Core setting | Best PER (greedy) | 3-gram WER | Notes |
 |------|---------|--------------|------------------:|-----------:|-------|
-| 1 | E | Skip-diphone + smoothness, λ=0.005 | 19.20% | TBD | Best acoustic model, epoch 143 |
+| 1 | E | Skip-diphone + smoothness, λ=0.005 | 18.99% | TBD | Best acoustic model |
 | 2 | D | Skip-diphone, λ=0.001 | 19.50% | TBD | Skip-diphone auxiliary supervision |
 | 3 | C | Diphone + smoothness, λ=0.01 | 19.58% | TBD | High smoothness weight, epoch 114 |
 | 4 | C | Diphone + smoothness, λ=0.005 | 19.63% | TBD |  |
@@ -238,7 +238,7 @@ Current acoustic decoding results on the test split:
 | 6 | C | Diphone + smoothness, λ=0.001 | 19.67% | TBD |  |
 | 7 | A | Monophone CTC baseline | 20.94% | TBD | Acoustic baseline |
 
-Variant E improves PER from 20.94% to 19.20%, corresponding to a 1.74 absolute-point reduction and an 8.3% relative reduction over the monophone baseline.
+Variant E improves PER from 20.94% to 18.99%, corresponding to a 1.95 absolute-point reduction and a 9.3% relative reduction over the monophone baseline.
 
 WER results are being re-evaluated after updating the LM decoding path to use raw acoustic logits instead of normalized log probabilities.
 
