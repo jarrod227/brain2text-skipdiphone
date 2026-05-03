@@ -1,26 +1,19 @@
 # Brain-to-Text: Skip-Diphone Auxiliary Supervision and Temporal Smoothness Regularization
 
-This repository contains the implementation for a course project that proposes to extend the [DCoND](https://arxiv.org/abs/2411.10657) framework for neural speech decoding with two additions:
-(i) a **skip-diphone auxiliary head** predicting z_{t-2}→z_t context pairs, and
+Course project extending [DCoND](https://arxiv.org/abs/2411.10657) with:
+(i) a **skip-diphone auxiliary head** (z_{t-2}→z_t), and
 (ii) a **temporal smoothness loss** on marginalized phoneme probabilities.
 
-For full motivation, method, and evaluation plan, see [docs/proposal.pdf](docs/proposal.pdf).
+See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation plan.
 
 ---
 
-## Background
-
-The standard Brain-to-Text pipeline (Willett et al., Nature 2023) maps intracortical neural features to
-monophone probabilities via a bidirectional GRU under CTC loss. DCoND improves this by predicting
-diphones (z_{t-1}→z_t, C²=1600 classes) and marginalizing back to phonemes. This project tests whether
-broader articulatory context (skip-diphones) and output regularization (smoothness) further reduce PER/WER.
-
-Five ablation variants are studied:
+## Variants
 
 | Variant | Description |
 |---------|-------------|
 | A | GRU + monophone CTC (NPTL baseline) |
-| B | GRU + standard diphone + marginalization (DCoND) |
+| B | GRU + diphone CTC + marginalization (DCoND) |
 | C | B + temporal smoothness loss |
 | D | B + skip-diphone auxiliary head |
 | E | B + skip-diphone + smoothness (full model) |
@@ -29,134 +22,107 @@ Five ablation variants are studied:
 
 ## Requirements
 
-- Python 3.11
-- CUDA 11.8+ / cuDNN 8+ recommended
-- GPU: ≥16 GB VRAM (A100, V100, or RTX 3090 all sufficient)
+- Python 3.11, CUDA 11.8+, ≥16 GB VRAM
 
 ---
 
 ## Installation
 
-Create and activate a dedicated conda environment first (tested with Python 3.11):
-
 ```bash
-conda create -n b2t python=3.11
-conda activate b2t
-```
-
-Then install dependencies in this order:
-
-```bash
-# Run from anywhere:
-# 1. Install PyTorch with CUDA support (adjust cu118 to match your CUDA version)
+conda create -n b2t python=3.11 && conda activate b2t
 pip install torch --index-url https://download.pytorch.org/whl/cu118
-# See https://pytorch.org/get-started/locally/ for the right command
-
-# Run from inside the brain2text-skipdiphone/ directory:
-# 2. Install this project's dependencies
 pip install -r requirements.txt
-
-# Run from outside the brain2text-skipdiphone/ directory:
-# 3. (Optional) Install language model decoder for n-gram rescoring
-git clone https://github.com/fwillett/speechBCI.git
-# Follow speechBCI/LanguageModelDecoder/README.md to compile and install KenLM
 ```
 
-### Optional: separate LM decode environment (recommended for WER)
-
-`--lm` decoding depends on `speechBCI/LanguageModelDecoder` Python bindings (`lm_decoder`),
-which are often easiest to compile/run in a separate environment from training.
-This project was trained in `b2t` (PyTorch >=2.1), while LM decoding was validated
-in a separate `lm_decode` env with PyTorch 1.13.1.
+### LM decode environment (for WER)
 
 ```bash
-# 1) Create dedicated env for LM decode
-conda create -n lm_decode python=3.9 -y
-conda activate lm_decode
+conda create -n lm_decode python=3.9 -y && conda activate lm_decode
 pip install torch==1.13.1
-
-# 2) Build dependencies (use conda if sudo is unavailable)
 conda install -c conda-forge cmake gcc gxx make -y
 
-# 3) Build speechBCI LanguageModelDecoder runtime
+git clone https://github.com/fwillett/speechBCI.git
 cd ~/speechBCI/LanguageModelDecoder/runtime/server/x86
-mkdir -p build && cd build
-cmake ..
-make -j8
-cd ..
-
-# 4) Install Python bindings
+mkdir -p build && cd build && cmake .. && make -j8 && cd ..
 python setup.py install
-pip install editdistance omegaconf "numpy<2"
 
-# 5) Verify
-python -c "import lm_decoder; print('lm_decoder import OK')"
+pip install editdistance omegaconf "numpy<2" transformers
+python -c "import lm_decoder; print('OK')"
 ```
-
-If `lm_decoder` import fails or `--lm` crashes, re-check that the runtime was built
-inside the currently activated environment and that `data/languageModel/` contains
-`TLG.fst` and `words.txt`.
 
 ---
 
 ## Data
 
-See [data/README.md](data/README.md) for full download and conversion instructions.
+1. Download `competitionData.tar.gz` from https://doi.org/10.5061/dryad.x69p8czpq
+2. Convert with cffan's `formatCompetitionData.ipynb`
+3. Place at `data/competitionData.pkl`
 
-Summary:
-1. Download `competitionData.tar.gz` (required, 3.67 GB) and optionally `languageModel.tar.gz` (14.11 GB, for WER) from https://doi.org/10.5061/dryad.x69p8czpq
-2. Convert `.mat` files to `.pkl` using cffan's `formatCompetitionData.ipynb`
-3. Place the output at `data/competitionData.pkl` (matches the default `data_path` in `configs/default.yaml`)
+For WER: also download `languageModel.tar.gz` and extract to `data/languageModel/`.
 
 ---
 
 ## Training
 
-Run all variants sequentially (one GPU). Epoch counts are read automatically from
-`configs/default.yaml` (`num_epochs_by_variant`): A runs 80 epochs (~40 min on TITAN X),
-B/C/D/E run 120 epochs (~1 h each).
+A runs 80 epochs (~40 min on TITAN X); B/C/D/E run 120–150 epochs (~1 h each).
 
 ```bash
+# Variant A (baseline)
 nohup python src/train.py --variant A --config configs/default.yaml > experiments/variant_A.log 2>&1 &
+
+# Variant B
 nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
 
-# Variant C: sweep lambda_smooth to find the best value before running D/E
-nohup python src/train.py --variant C --lambda_smooth 1e-3 --config configs/default.yaml > experiments/variant_C_lam1e-3.log 2>&1 &
-nohup python src/train.py --variant C --lambda_smooth 5e-3 --config configs/default.yaml > experiments/variant_C_lam5e-3.log 2>&1 &
-nohup python src/train.py --variant C --lambda_smooth 1e-2 --config configs/default.yaml > experiments/variant_C_lam1e-2.log 2>&1 &
+# Variant C: sweep lambda_smooth
+for lam in 1e-3 5e-3 1e-2; do
+  nohup python src/train.py --variant C --lambda_smooth $lam --config configs/default.yaml \
+    > experiments/variant_C_lam${lam}.log 2>&1 &
+done
 
-# After C sweep: pick the best lambda_smooth, then run D and E
-# D does not use smoothness loss; lambda_smooth only applies to E
+# Variants D and E (use best lambda_smooth from C sweep for E)
 nohup python src/train.py --variant D --config configs/default.yaml > experiments/variant_D.log 2>&1 &
 nohup python src/train.py --variant E --lambda_smooth <best> --config configs/default.yaml > experiments/variant_E.log 2>&1 &
 ```
 
-Run one at a time. Monitor progress with `tail -f experiments/<log_file>`.
-Wait for the final epoch (A: 80, B/C/D/E: 120) before starting the next variant.
-For variant E, replace `<best>` with the `lambda_smooth` that gave the lowest PER in the C sweep.
-Checkpoints are written to `experiments/<run_name>/`.
-
-**Tip — multi-GPU:** Set `CUDA_VISIBLE_DEVICES` to assign each variant to a
-separate GPU and run them in parallel:
-```bash
-CUDA_VISIBLE_DEVICES=0 nohup python src/train.py --variant A --config configs/default.yaml > experiments/variant_A.log 2>&1 &
-CUDA_VISIBLE_DEVICES=1 nohup python src/train.py --variant B --config configs/default.yaml > experiments/variant_B.log 2>&1 &
-```
-Check GPU status with `watch -n 1 nvidia-smi`.
+Monitor: `tail -f experiments/<log_file>`. Multi-GPU: prefix with `CUDA_VISIBLE_DEVICES=N`.
 
 ---
 
 ## Evaluation
 
-```bash
-# PER only (no LM required)
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml
+### PER (greedy CTC)
 
-# PER + WER with n-gram LM (run in lm_decode env after compiling speechBCI LM decoder)
-# Note: WER is n-gram only (no LLM rescoring). cffan's ~23% WER uses additional
-# GPT-2 rescoring over 100-best hypotheses, which is not reproduced here.
-python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|C|D|E> --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
+```bash
+python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E> \
+    --config configs/default.yaml
 ```
+
+### WER with n-gram LM
+
+Run in `lm_decode` env:
+
+```bash
+python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E> \
+    --config configs/default.yaml --lm 3gram --lm_dir data/languageModel
+```
+
+### WER with GPT-2 rescoring
+
+```bash
+# Step 1: generate 100-best (lm_decode env)
+python src/decode.py --checkpoint experiments/<run>/best.pt --variant <A|B|C|D|E> \
+    --config configs/default.yaml --lm 3gram --lm_dir data/languageModel \
+    --nbest 100 --save_nbest experiments/<run>/nbest.pkl
+
+# Step 2: rescore and sweep alpha
+python src/rescore.py --nbest experiments/<run>/nbest.pkl
+
+# Step 3: fix best alpha
+python src/rescore.py --nbest experiments/<run>/nbest.pkl --alpha <best>
+```
+
+Note: n-gram-only WER is ~50%; GPT-2 rescoring brings it to ~25–30%.
+cffan's published ~23% WER uses OPT-6B rescoring on the competition partition.
 
 ---
 
@@ -164,20 +130,20 @@ python src/decode.py --checkpoint experiments/<run_name>/best.pt --variant <A|B|
 
 *To be filled after experiments.*
 
-| Variant | PER (greedy) | WER (3-gram) |
-|---------|-------------|-------------|
-| A | — | — |
-| B | — | — |
-| C | — | — |
-| D | — | — |
-| E | — | — |
+| Variant | PER (greedy) | WER (n-gram) | WER (GPT-2) |
+|---------|-------------|-------------|-------------|
+| A | — | — | — |
+| B | — | — | — |
+| C | — | — | — |
+| D | — | — | — |
+| E | — | — | — |
 
 ---
 
 ## References
 
 [1] F. R. Willett et al., A high-performance speech neuroprosthesis, *Nature* 620:1031–1036, 2023.  
-[2] F. R. Willett et al., Data for: A high-performance speech neuroprosthesis, *Dryad*, 2023. https://doi.org/10.5061/dryad.x69p8czpq  
+[2] F. R. Willett et al., Data: A high-performance speech neuroprosthesis, *Dryad*, 2023. https://doi.org/10.5061/dryad.x69p8czpq  
 [3] J. Li, T. Le, C. Fan, M. Chen, E. Shlizerman, Brain-to-Text Decoding with Context-Aware Neural Representations and LLMs, *arXiv:2411.10657*, 2024.  
 [4] Brain-to-Text Benchmark '24, Eval.AI Challenge #2099. https://eval.ai/web/challenges/challenge-page/2099/overview  
-[5] C. Fan et al., Neural Sequence Decoder (reference implementation of DCoND), GitHub. https://github.com/cffan/neural_seq_decoder
+[5] C. Fan et al., Neural Sequence Decoder, GitHub. https://github.com/cffan/neural_seq_decoder
