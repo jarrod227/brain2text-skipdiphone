@@ -146,10 +146,7 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
                 hyp_text = results[0].sentence.strip() if results else ""
                 wer_scores.append(word_error_rate(hyp_text, batch["transcripts"][i].strip()))
                 if save_nbest:
-                    nbest_outputs.append([
-                        {"sentence": r.sentence.strip(), "score": float(r.score)}
-                        for r in results
-                    ])
+                    nbest_outputs.append([r.sentence.strip() for r in results])
                     all_transcripts.append(batch["transcripts"][i].strip())
 
     if save_nbest and nbest_outputs:
