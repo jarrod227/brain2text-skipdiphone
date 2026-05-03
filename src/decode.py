@@ -64,7 +64,7 @@ def _build_lm_decoder(lm_dir):
         200,    # min_active
         17.0,   # beam
         8.0,    # lattice_beam
-        1.5,    # acoustic_scale
+        0.5,    # acoustic_scale  (matches cffan eval_competition.py)
         1.0,    # ctc_blank_skip_threshold
         0.0,    # length_penalty
         1,      # nbest
@@ -130,7 +130,7 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
         if lm is not None:
             lp_kaldi = _rearrange_for_kaldi(log_probs).cpu().numpy().astype(np.float32)
             log_priors = np.zeros([1, lp_kaldi.shape[-1]], dtype=np.float32)
-            blank_penalty = 0.0
+            blank_penalty = float(np.log(7))  # matches cffan eval_competition.py
             for i, L in enumerate(enc_lengths.cpu().tolist()):
                 decoder_lm.Reset()
                 lm_module.DecodeNumpy(decoder_lm, lp_kaldi[i, :L], log_priors, blank_penalty)
