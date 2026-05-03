@@ -8,13 +8,18 @@ Usage:
     # PER only (no LM)  — runs in the b2t training env
     python src/decode.py --checkpoint experiments/<run>/best.pt --variant A
 
-    # PER + WER with 3-gram LM  — must run in the lm_decode env (PyTorch 1.13.1
-    # + speechBCI lm_decoder package)
+    # PER + WER with n-gram LM  — must run in the lm_decode env
     python src/decode.py --checkpoint experiments/<run>/best.pt --variant E \
         --lm 3gram --lm_dir data/languageModel
+
+    # Save 100-best for GPT-2 rescoring
+    python src/decode.py --checkpoint experiments/<run>/best.pt --variant E \
+        --lm 3gram --lm_dir data/languageModel --nbest 100 \
+        --save_nbest experiments/<run>/nbest.pkl
 """
 
 import argparse
+import pickle
 from pathlib import Path
 
 import editdistance
@@ -56,8 +61,8 @@ def _rearrange_for_kaldi(log_probs):
     return torch.cat([blank, sil, phones], dim=-1)
 
 
-def _build_lm_decoder(lm_dir):
-    """Build a 3-gram WFST decoder using the speechBCI lm_decoder package."""
+def _build_lm_decoder(lm_dir, nbest=1):
+    """Build a WFST decoder using the speechBCI lm_decoder package."""
     import lm_decoder  # noqa: only available in lm_decode conda env
     opts = lm_decoder.DecodeOptions(
         7000,   # max_active
@@ -67,7 +72,7 @@ def _build_lm_decoder(lm_dir):
         0.5,    # acoustic_scale  (matches cffan eval_competition.py)
         1.0,    # ctc_blank_skip_threshold
         0.0,    # length_penalty
-        1,      # nbest
+        nbest,
     )
     lm_path = Path(lm_dir)
     resource = lm_decoder.DecodeResource(
@@ -82,18 +87,20 @@ def _build_lm_decoder(lm_dir):
 
 @torch.no_grad()
 def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
-           dump_examples=0):
+           dump_examples=0, nbest=1, save_nbest=None):
     model.eval()
     total_edits = 0
     total_ref_len = 0
     wer_scores = []
+    nbest_outputs = []   # list of lists of Result objects
+    all_transcripts = []
     dumped = 0
 
     decoder_lm = None
     lm_module = None
     if lm is not None:
         import lm_decoder as lm_module
-        decoder_lm = _build_lm_decoder(lm_dir)
+        decoder_lm = _build_lm_decoder(lm_dir, nbest=nbest)
 
     blank = model.num_phonemes
 
@@ -138,6 +145,15 @@ def decode(model, loader, device, variant="E", lm=None, lm_dir=None,
                 results = decoder_lm.result()
                 hyp_text = results[0].sentence.strip() if results else ""
                 wer_scores.append(word_error_rate(hyp_text, batch["transcripts"][i].strip()))
+                if save_nbest:
+                    nbest_outputs.append(results)
+                    all_transcripts.append(batch["transcripts"][i].strip())
+
+    if save_nbest and nbest_outputs:
+        Path(save_nbest).parent.mkdir(parents=True, exist_ok=True)
+        with open(save_nbest, "wb") as f:
+            pickle.dump({"nbest": nbest_outputs, "transcripts": all_transcripts}, f)
+        print(f"Saved {len(nbest_outputs)} nbest lists to {save_nbest}")
 
     per = total_edits / max(total_ref_len, 1)
     wer = sum(wer_scores) / len(wer_scores) if wer_scores else float("nan")
@@ -160,6 +176,10 @@ def main():
                         help="n-gram LM for WER (requires speechBCI lm_decoder)")
     parser.add_argument("--lm_dir", default=None,
                         help="path to TLG.fst / words.txt (defaults to cfg.lm_dir)")
+    parser.add_argument("--nbest",  default=1, type=int,
+                        help="number of hypotheses to return from n-gram decoder")
+    parser.add_argument("--save_nbest", default=None,
+                        help="save nbest lists to this .pkl path for GPT-2 rescoring")
     parser.add_argument("--dump_examples", default=0, type=int,
                         help="print first N decoded examples for debugging")
     parser.add_argument("--config", default="configs/default.yaml")
@@ -187,10 +207,11 @@ def main():
                              num_phonemes=cfg.num_phonemes, shuffle=False)
 
     per, wer = decode(model, loader, device, variant=args.variant,
-                      lm=args.lm, lm_dir=lm_dir, dump_examples=args.dump_examples)
+                      lm=args.lm, lm_dir=lm_dir, dump_examples=args.dump_examples,
+                      nbest=args.nbest, save_nbest=args.save_nbest)
     print(f"PER: {per * 100:.2f}%")
     if args.lm is not None:
-        print(f"WER: {wer * 100:.2f}%")
+        print(f"WER (n-gram): {wer * 100:.2f}%")
 
 
 if __name__ == "__main__":
