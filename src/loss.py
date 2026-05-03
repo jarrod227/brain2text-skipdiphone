@@ -70,8 +70,11 @@ def compute_loss(mono_log_probs, diphone_log_probs, skip_log_probs,
         components["ctc_mono"] = l_mono
         return l_mono, components
 
-    # Variants B / C / D / E all use the diphone CTC as main objective
-    l_mono    = ctc_mono(mono_log_probs, targets["mono"],
+    # Variants B / C / D / E all use the diphone CTC as main objective.
+    # l_mono is computed from marginalized phoneme probs so that both loss
+    # terms train the diphone head (no competing gradient from mono_head).
+    phone_log_probs = torch.log(phoneme_probs.clamp(min=1e-10)).permute(1, 0, 2)
+    l_mono    = ctc_mono(phone_log_probs, targets["mono"],
                          input_lengths, target_lengths["mono"])
     l_diphone = ctc_dip(diphone_log_probs, targets["diphone"],
                         input_lengths, target_lengths["diphone"])
