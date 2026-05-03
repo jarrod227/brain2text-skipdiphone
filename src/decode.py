@@ -61,6 +61,29 @@ def _rearrange_for_kaldi(log_probs):
     return torch.cat([blank, sil, phones], dim=-1)
 
 
+def _marginalize_diphone_logits(diphone_logits, num_phonemes):
+    """
+    Convert raw diphone logits to raw-ish phoneme logits using logsumexp.
+
+    diphone class index = prev_phoneme * C + curr_phoneme
+
+    Args:
+        diphone_logits: (B, T, C*C + 1), last dim is CTC blank
+        num_phonemes: C
+
+    Returns:
+        phoneme_logits: (B, T, C + 1), last dim is CTC blank
+    """
+    B, T, _ = diphone_logits.shape
+    C = num_phonemes
+
+    dip = diphone_logits[..., :-1].view(B, T, C, C)  # (B, T, prev, curr)
+    phone_logits = torch.logsumexp(dip, dim=2)       # sum over prev phoneme
+    blank_logits = diphone_logits[..., -1:]          # keep blank logit
+
+    return torch.cat([phone_logits, blank_logits], dim=-1)
+
+
 def _build_lm_decoder(lm_dir, nbest=1):
     """Build a WFST decoder using the speechBCI lm_decoder package."""
     import lm_decoder  # noqa: only available in lm_decode conda env
