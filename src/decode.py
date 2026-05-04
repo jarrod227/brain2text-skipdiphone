@@ -248,7 +248,14 @@ def decode(
                 total_ref_words += max(len(ref_words), 1)
 
                 if save_nbest:
-                    nbest_outputs.append([r.sentence.strip() for r in results])
+                    nbest_outputs.append([
+                        {
+                            "sentence": r.sentence.strip(),
+                            "ac_score": float(r.ac_score),
+                            "lm_score": float(r.lm_score),
+                        }
+                        for r in results
+                    ])
                     all_transcripts.append(ref_text)
 
     if save_nbest and nbest_outputs:
