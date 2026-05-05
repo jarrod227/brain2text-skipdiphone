@@ -24,7 +24,8 @@ See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation pl
 
 - Python 3.11
 - CUDA 11.8+
-- ≥16 GB VRAM recommended
+- ≥16 GB VRAM recommended for training
+- Large RAM is recommended for 5-gram WFST decoding, especially if using the unpruned rescoring graph
 
 ---
 
@@ -58,8 +59,15 @@ make -j8
 cd ..
 python setup.py install
 
-pip install editdistance omegaconf "numpy<2" transformers
+pip install editdistance omegaconf "numpy<2"
 python -c "import lm_decoder; print('OK')"
+```
+
+For GPT-2 rescoring, use the `b2t` environment or another PyTorch 2.x environment:
+
+```bash
+conda activate b2t
+pip install transformers editdistance
 ```
 
 ---
@@ -74,28 +82,54 @@ python -c "import lm_decoder; print('OK')"
 data/competitionData.pkl
 ```
 
-For WER decoding, also download `languageModel.tar.gz` and extract it to:
+For 3-gram WER decoding, download `languageModel.tar.gz` and extract it to:
 
 ```bash
 data/languageModel/
 ```
 
-Expected structure:
+Expected 3-gram structure:
 
 ```text
 data/
 ├── competitionData.pkl
 └── languageModel/
     ├── TLG.fst
+    ├── G.fst
+    ├── G_no_prune.fst
     ├── words.txt
     └── ...
+```
+
+For optional 5-gram WER decoding, download and extract the 5-gram language model. In my setup, the 5-gram files are located at:
+
+```text
+data/speech_5gram/lang_test/
+├── TLG.fst
+├── G.fst
+├── G_no_prune.fst
+└── words.txt
+```
+
+If `G_no_prune.fst` is too large for available RAM, it can be temporarily renamed so that decoding uses the pruned 5-gram graph only:
+
+```bash
+mv data/speech_5gram/lang_test/G_no_prune.fst \
+   data/speech_5gram/lang_test/G_no_prune.fst.bak
+```
+
+Restore it with:
+
+```bash
+mv data/speech_5gram/lang_test/G_no_prune.fst.bak \
+   data/speech_5gram/lang_test/G_no_prune.fst
 ```
 
 ---
 
 ## Training
 
-Variant A runs 80 epochs. Variants B/C/D/E run 120–150 epochs.
+Variant A runs 80 epochs. Variants B/C/D/E run 120–150 epochs because the diphone and skip-diphone variants have larger output spaces and additional objectives.
 
 ```bash
 # Variant A: monophone baseline
@@ -149,7 +183,7 @@ CUDA_VISIBLE_DEVICES=<gpu_id>
 
 ## Evaluation
 
-### Quick acoustic evaluation: PER only
+### PER: greedy CTC
 
 PER is computed on the test split using greedy CTC decoding.
 
@@ -165,62 +199,98 @@ python src/decode.py \
 
 ---
 
-### Full decoding evaluation: PER + 3-gram WER
+### WER: 3-gram WFST decoding
 
 Run this in the `lm_decode` environment.
 
-For fair comparison, all variants are decoded using the same LM settings:
+The default WER settings follow the speechBCI WFST decoder defaults:
 
 ```text
-acoustic_scale = 0.8
-beam = 18
-blank_penalty = log(7)
+acoustic_scale = 1.5
+beam = 17
+blank_penalty = 0.0
 ```
 
-No per-variant decoding-parameter tuning is used.
-
 ```bash
+conda activate lm_decode
+cd ~/brain2text-skipdiphone
+
 python src/decode.py \
   --checkpoint experiments/<run>/best.pt \
   --variant <A|B|C|D|E> \
   --config configs/default.yaml \
   --lm 3gram \
-  --lm_dir data/languageModel \
-  --acoustic_scale 0.8 \
-  --beam 18 \
-  --blank_penalty 1.9459
+  --lm_dir data/languageModel
 ```
 
-Implementation note: WER decoding uses raw acoustic logits, matching the official `speechBCI` inference style. For diphone-based variants, raw diphone logits are marginalized to phoneme-level logits using log-sum-exp before Kaldi/WFST decoding.
+Implementation note: WER decoding uses raw acoustic logits. For diphone-based variants, raw diphone logits are marginalized to phoneme-level logits using log-sum-exp before Kaldi/WFST decoding.
 
 ---
 
-### WER with GPT-2 rescoring
+### Optional: 5-gram WFST decoding
 
-Step 1: generate 100-best hypotheses with the 3-gram LM.
+Run this in the `lm_decode` environment.
 
 ```bash
+conda activate lm_decode
+cd ~/brain2text-skipdiphone
+
 python src/decode.py \
-  --checkpoint experiments/<run>/best.pt \
-  --variant <A|B|C|D|E> \
+  --checkpoint experiments/variant_E_alpha0.6_beta0.1_lam0.005/best.pt \
+  --variant E \
+  --config configs/decode_small.yaml \
+  --lm 5gram \
+  --lm_dir data/speech_5gram/lang_test
+```
+
+If `G_no_prune.fst` is disabled due to memory limits, report the result as:
+
+```text
+5-gram decoding without unpruned LM rescoring
+```
+
+---
+
+### Optional: GPT-2 combined rescoring
+
+First generate 100-best hypotheses with the n-gram decoder:
+
+```bash
+conda activate lm_decode
+cd ~/brain2text-skipdiphone
+
+python src/decode.py \
+  --checkpoint experiments/variant_E_alpha0.6_beta0.1_lam0.005/best.pt \
+  --variant E \
   --config configs/default.yaml \
   --lm 3gram \
   --lm_dir data/languageModel \
-  --acoustic_scale 0.8 \
-  --beam 18 \
-  --blank_penalty 1.9459 \
   --nbest 100 \
-  --save_nbest experiments/<run>/nbest.pkl
+  --save_nbest experiments/variant_E_alpha0.6_beta0.1_lam0.005/nbest.pkl
 ```
 
-Step 2: rescore the 100-best hypotheses with GPT-2.
+Then rescore in the `b2t` environment:
 
 ```bash
+conda activate b2t
+cd ~/brain2text-skipdiphone
+
 python src/rescore.py \
-  --nbest experiments/<run>/nbest.pkl
+  --nbest experiments/variant_E_alpha0.6_beta0.1_lam0.005/nbest.pkl \
+  --model_name gpt2 \
+  --alpha 0.5 \
+  --acoustic_scale 0.8
 ```
 
-GPT-2 rescoring is included as an optional post-processing experiment. The main ablation comparison should use the same fixed 3-gram LM decoding settings for all variants.
+The rescoring score follows the speechBCI/DCoND-style combination:
+
+```text
+total_score = alpha * GPT_score
+            + (1 - alpha) * old_LM_score
+            + acoustic_scale * acoustic_score
+```
+
+GPT-2 rescoring is optional and is not claimed as a project contribution. The project contribution is the acoustic-model objective.
 
 ---
 
@@ -228,11 +298,11 @@ GPT-2 rescoring is included as an optional post-processing experiment. The main 
 
 Current acoustic decoding results on the test split:
 
-| Rank | Variant | Core setting | Best PER (greedy) | 3-gram WER | Notes |
-|------|---------|--------------|------------------:|-----------:|-------|
+| Rank | Variant | Core setting | Best PER (greedy) | WER | Notes |
+|------|---------|--------------|------------------:|----:|-------|
 | 1 | E | Skip-diphone + smoothness, λ=0.005 | 18.99% | TBD | Best acoustic model |
 | 2 | D | Skip-diphone, λ=0.001 | 19.50% | TBD | Skip-diphone auxiliary supervision |
-| 3 | C | Diphone + smoothness, λ=0.01 | 19.58% | TBD | High smoothness weight, epoch 114 |
+| 3 | C | Diphone + smoothness, λ=0.01 | 19.58% | TBD | High smoothness weight |
 | 4 | C | Diphone + smoothness, λ=0.005 | 19.63% | TBD |  |
 | 5 | B | Diphone baseline | 19.64% | TBD |  |
 | 6 | C | Diphone + smoothness, λ=0.001 | 19.67% | TBD |  |
@@ -240,7 +310,7 @@ Current acoustic decoding results on the test split:
 
 Variant E improves PER from 20.94% to 18.99%, corresponding to a 1.95 absolute-point reduction and a 9.3% relative reduction over the monophone baseline.
 
-WER results are being re-evaluated after updating the LM decoding path to use raw acoustic logits instead of normalized log probabilities.
+Earlier decoding experiments showed that WER improves only modestly under 3-gram/5-gram WFST decoding and GPT-2 rescoring. This suggests that phoneme-level acoustic gains do not directly translate into word-level gains without stronger acoustic-LM calibration, a stronger baseline decoder, or the full unpruned/LLM rescoring pipeline.
 
 ---
 
@@ -251,7 +321,9 @@ This project reports two types of metrics:
 1. **PER**, which evaluates the acoustic neural-to-phoneme model directly.
 2. **WER**, which evaluates the full decoding pipeline with a language model.
 
-For fair A/B/C/D/E comparison, all variants should use the same WER decoding parameters. This avoids giving one variant an unfair advantage through per-model decoder tuning.
+The main project contribution is the acoustic model objective: skip-diphone auxiliary supervision and temporal smoothness regularization. For word-level evaluation, this project follows the standard speechBCI/DCoND-style WFST and optional n-best rescoring pipeline.
+
+For fair A/B/C/D/E comparison, all variants should use the same WER decoding settings.
 
 ---
 
@@ -261,4 +333,5 @@ For fair A/B/C/D/E comparison, all variants should use the same WER decoding par
 [2] F. R. Willett et al., Data: A high-performance speech neuroprosthesis, *Dryad*, 2023. https://doi.org/10.5061/dryad.x69p8czpq  
 [3] J. Li, T. Le, C. Fan, M. Chen, E. Shlizerman, Brain-to-Text Decoding with Context-Aware Neural Representations and LLMs, *arXiv:2411.10657*, 2024.  
 [4] Brain-to-Text Benchmark '24, Eval.AI Challenge #2099. https://eval.ai/web/challenges/challenge-page/2099/overview  
-[5] C. Fan et al., Neural Sequence Decoder, GitHub. https://github.com/cffan/neural_seq_decoder
+[5] C. Fan et al., Neural Sequence Decoder, GitHub. https://github.com/cffan/neural_seq_decoder  
+[6] F. Willett et al., speechBCI, GitHub. https://github.com/fwillett/speechBCI
