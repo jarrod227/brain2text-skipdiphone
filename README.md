@@ -203,7 +203,7 @@ python src/decode.py \
 
 Run this in the `lm_decode` environment.
 
-The default WER settings follow the speechBCI WFST decoder defaults:
+WER decoding uses the official `speechBCI` WFST decoder with speechBCI-style default settings:
 
 ```text
 acoustic_scale = 1.5
@@ -227,46 +227,22 @@ Implementation note: WER decoding uses raw acoustic logits. For diphone-based va
 
 ---
 
-### Optional: 5-gram WFST decoding
-
-Run this in the `lm_decode` environment.
-
-```bash
-conda activate lm_decode
-cd ~/brain2text-skipdiphone
-
-python src/decode.py \
-  --checkpoint experiments/variant_E_alpha0.6_beta0.1_lam0.005/best.pt \
-  --variant E \
-  --config configs/decode_small.yaml \
-  --lm 5gram \
-  --lm_dir data/speech_5gram/lang_test
-```
-
-If `G_no_prune.fst` is disabled due to memory limits, report the result as:
-
-```text
-5-gram decoding without unpruned LM rescoring
-```
-
----
-
 ### Optional: GPT-2 combined rescoring
 
-First generate 100-best hypotheses with the n-gram decoder:
+First generate 100-best hypotheses with the 3-gram LM:
 
 ```bash
 conda activate lm_decode
 cd ~/brain2text-skipdiphone
 
 python src/decode.py \
-  --checkpoint experiments/variant_E_alpha0.6_beta0.1_lam0.005/best.pt \
-  --variant E \
+  --checkpoint experiments/<run>/best.pt \
+  --variant <A|B|C|D|E> \
   --config configs/default.yaml \
   --lm 3gram \
   --lm_dir data/languageModel \
   --nbest 100 \
-  --save_nbest experiments/variant_E_alpha0.6_beta0.1_lam0.005/nbest.pkl
+  --save_nbest experiments/<run>/nbest.pkl
 ```
 
 Then rescore in the `b2t` environment:
@@ -276,7 +252,7 @@ conda activate b2t
 cd ~/brain2text-skipdiphone
 
 python src/rescore.py \
-  --nbest experiments/variant_E_alpha0.6_beta0.1_lam0.005/nbest.pkl \
+  --nbest experiments/<run>/nbest.pkl \
   --model_name gpt2 \
   --alpha 0.5 \
   --acoustic_scale 0.8
