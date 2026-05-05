@@ -84,7 +84,7 @@ def _marginalize_diphone_logits(diphone_logits, num_phonemes):
     return torch.cat([phone_logits, blank_logits], dim=-1)
 
 
-def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=18.0):
+def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=1.5, beam=17.0):
     """
     Build a WFST decoder using the speechBCI lm_decoder package.
 
@@ -127,9 +127,9 @@ def decode(
     dump_examples=0,
     nbest=1,
     save_nbest=None,
-    acoustic_scale=0.8,
-    beam=18.0,
-    blank_penalty=None,
+    acoustic_scale=1.5,
+    beam=17.0,
+    blank_penalty=0.0,
 ):
     model.eval()
 
@@ -155,7 +155,7 @@ def decode(
         )
 
     if blank_penalty is None:
-        blank_penalty = float(np.log(7))
+        blank_penalty = 0.0
 
     blank = model.num_phonemes
 
@@ -297,12 +297,12 @@ def main():
                         help="save nbest lists to this .pkl path for GPT-2 rescoring")
     parser.add_argument("--dump_examples", default=0, type=int,
                         help="print first N decoded examples for debugging")
-    parser.add_argument("--acoustic_scale", default=0.8, type=float,
-                    help="WFST acoustic scale; official notebook uses about 0.8")
-    parser.add_argument("--beam", default=18.0, type=float,
-                    help="WFST beam; official notebook uses about 18")
-    parser.add_argument("--blank_penalty", default=None, type=float,
-                    help="blank penalty for lm_decoder; default is log(7)")
+    parser.add_argument("--acoustic_scale", default=1.5, type=float,
+                    help="WFST acoustic scale; speechBCI default is 1.5")
+    parser.add_argument("--beam", default=17.0, type=float,
+                    help="WFST beam; speechBCI default is 17")
+    parser.add_argument("--blank_penalty", default=0.0, type=float,
+                    help="blank penalty for lm_decoder; speechBCI default is 0.0")
     parser.add_argument("--config", default="configs/default.yaml")
     args = parser.parse_args()
 
