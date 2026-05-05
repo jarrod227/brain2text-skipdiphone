@@ -38,7 +38,7 @@ def word_error_rate(hyp_text, ref_text):
 
 
 def _ctc_collapse(frame_ids, blank):
-    """Collapse consecutive duplicates then remove blank."""
+    """Collapse consecutive duplicates, then remove the CTC blank."""
     collapsed = []
     prev = None
     for t in frame_ids:
@@ -48,50 +48,59 @@ def _ctc_collapse(frame_ids, blank):
     return [t for t in collapsed if t != blank]
 
 
-def _rearrange_for_kaldi(log_probs):
+def _rearrange_for_kaldi(logits):
     """
-    Reorder the last dim from our model layout to the Kaldi/LM layout.
-        Ours:  [phone_0, ..., phone_38=ZH, phone_39=SIL, blank]
-        Kaldi: [blank, SIL, phone_0, ..., phone_38=ZH]
-    Equivalent to speechBCI's rearrange_speech_logits(has_sil=True).
+    Reorder the last dimension from the model layout to the speechBCI/Kaldi layout.
+
+        Model layout:  [phone_0, ..., phone_38=ZH, phone_39=SIL, blank]
+        Kaldi layout:  [blank, SIL, phone_0, ..., phone_38=ZH]
+
+    This matches speechBCI's rearrange_speech_logits(has_sil=True).
     """
-    blank  = log_probs[..., -1:]
-    sil    = log_probs[..., -2:-1]
-    phones = log_probs[..., :-2]
+    blank  = logits[..., -1:]
+    sil    = logits[..., -2:-1]
+    phones = logits[..., :-2]
     return torch.cat([blank, sil, phones], dim=-1)
 
 
 def _marginalize_diphone_logits(diphone_logits, num_phonemes):
     """
-    Convert raw diphone logits to raw-ish phoneme logits using logsumexp.
+    Convert raw diphone logits to phoneme-level logits using log-sum-exp.
 
-    diphone class index = prev_phoneme * C + curr_phoneme
+    Diphone class index:
+        diphone_id = previous_phoneme * C + current_phoneme
 
     Args:
-        diphone_logits: (B, T, C*C + 1), last dim is CTC blank
+        diphone_logits: (B, T, C*C + 1), where the last class is CTC blank
         num_phonemes: C
 
     Returns:
-        phoneme_logits: (B, T, C + 1), last dim is CTC blank
+        phoneme_logits: (B, T, C + 1), where the last class is CTC blank
     """
     B, T, _ = diphone_logits.shape
     C = num_phonemes
 
-    dip = diphone_logits[..., :-1].view(B, T, C, C)  # (B, T, prev, curr)
-    phone_logits = torch.logsumexp(dip, dim=2)       # sum over prev phoneme
-    blank_logits = diphone_logits[..., -1:]          # keep blank logit
+    dip = diphone_logits[..., :-1].view(B, T, C, C)  # (B, T, previous, current)
+    phone_logits = torch.logsumexp(dip, dim=2)       # marginalize previous phoneme
+    blank_logits = diphone_logits[..., -1:]          # keep CTC blank logit
 
     return torch.cat([phone_logits, blank_logits], dim=-1)
 
 
 def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=1.5, beam=17.0):
     """
-    Build a WFST decoder using the speechBCI lm_decoder package.
+    Build a WFST decoder using the official speechBCI lm_decoder package.
 
-    Default acoustic_scale=0.8 and beam=18 follow the official
-    speechBCI baseline inference notebook more closely than 0.5 / 17.
+    Defaults follow the speechBCI WFST decoder settings:
+        acoustic_scale = 1.5
+        beam           = 17.0
+        blank_penalty  = 0.0  (passed separately to DecodeNumpy)
+
+    Other DecodeOptions are also kept aligned with speechBCI defaults:
+        max_active=7000, min_active=200, lattice_beam=8.0,
+        ctc_blank_skip_threshold=1.0, length_penalty=0.0.
     """
-    import lm_decoder  # noqa: only available in lm_decode conda env
+    import lm_decoder  # noqa: only available in the lm_decode conda env
 
     opts = lm_decoder.DecodeOptions(
         7000,             # max_active
@@ -176,8 +185,8 @@ def decode(
         ) = model(neural, lengths, day_ids, return_logits=True)
 
         # ------------------------------------------------------------
-        # PER path: use log_probs / probabilities for greedy CTC.
-        # This preserves your old PER behavior.
+        # PER path: greedy CTC over phoneme probabilities/log-probs.
+        # This preserves the acoustic PER behavior used during training.
         # ------------------------------------------------------------
         if variant == "A":
             per_log_probs = mono_lp.permute(1, 0, 2)
@@ -208,8 +217,9 @@ def decode(
             offset += ref_lens[i]
 
         # ------------------------------------------------------------
-        # WER path: use RAW LOGITS, not log_probs.
-        # This is the important fix.
+        # WER path: use raw acoustic logits, matching speechBCI style.
+        # For diphone variants, raw diphone logits are marginalized to
+        # phoneme-level logits before Kaldi/WFST decoding.
         # ------------------------------------------------------------
         if lm is not None:
             if variant == "A":
@@ -274,6 +284,7 @@ def decode(
     wer = total_word_edits / max(total_ref_words, 1) if lm is not None else float("nan")
 
     return per, wer
+
 
 def _load_checkpoint(path, device):
     """Load a state dict; weights_only is only available on PyTorch >= 2.0."""
