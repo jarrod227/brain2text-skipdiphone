@@ -89,7 +89,7 @@ def rescore(
     model,
     tokenizer,
     device,
-    alpha=0.7,
+    alpha=0.5,
     acoustic_scale=0.8,
     length_penalty=0.0,
     dump_examples=0,
@@ -152,7 +152,7 @@ def main():
     parser.add_argument(
         "--alpha",
         type=float,
-        default=0.7,
+        default=0.5,
         help="Weight on GPT score. old LM score weight is 1-alpha.",
     )
     parser.add_argument(
