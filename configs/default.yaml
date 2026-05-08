@@ -39,6 +39,20 @@ data_path: "data/competitionData.pkl"  # output of formatCompetitionData.ipynb
 lm_dir: "data/languageModel"
 debug_subset: false        # set true to use first 200 trials for fast debugging
 
+# Train/dev split: every Nth trial in the pkl 'train' bucket goes to dev.
+# 10 -> ~10% dev set, balanced across recording days. Set to 0 to disable
+# (legacy behavior: pkl 'test' is then used for both validation and reporting).
+dev_stride: 10
+
+# Determinism: when true, forces cuDNN GRU to use deterministic kernels.
+# About ~20% slower; needed for tight multi-seed comparisons.
+cudnn_deterministic: false
+
+# How often (in epochs) to also evaluate on the pkl 'test' split. This is
+# only used as a tracking signal during training. Final test PER should be
+# obtained by running decode.py on best_dev.pt.
+eval_test_every: 5
+
 # Logging
 log_dir: "experiments"
 save_every: 5             # checkpoint every N epochs
