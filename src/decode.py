@@ -173,25 +173,17 @@ def decode(
         lengths = batch["lengths"].to(device)
         day_ids = batch["day_ids"].to(device)
 
-        (
-            mono_lp,
-            _,
-            _,
-            phoneme_probs,
-            enc_lengths,
-            mono_logits,
-            diphone_logits,
-            _,
-        ) = model(neural, lengths, day_ids, return_logits=True)
+        outputs = model(neural, lengths, day_ids, return_logits=True)
+        enc_lengths = outputs["enc_lengths"]
 
         # ------------------------------------------------------------
         # PER path: greedy CTC over phoneme probabilities/log-probs.
         # This preserves the acoustic PER behavior used during training.
         # ------------------------------------------------------------
         if variant == "A":
-            per_log_probs = mono_lp.permute(1, 0, 2)
+            per_log_probs = outputs["mono_log_probs"].permute(1, 0, 2)
         else:
-            per_log_probs = torch.log(phoneme_probs.clamp(min=1e-10))
+            per_log_probs = torch.log(outputs["phoneme_probs"].clamp(min=1e-10))
 
         frame_ids = per_log_probs.argmax(dim=-1).cpu().tolist()
         enc_lens_list = enc_lengths.cpu().tolist()
@@ -223,10 +215,10 @@ def decode(
         # ------------------------------------------------------------
         if lm is not None:
             if variant == "A":
-                acoustic_logits = mono_logits
+                acoustic_logits = outputs["mono_logits"]
             else:
                 acoustic_logits = _marginalize_diphone_logits(
-                    diphone_logits,
+                    outputs["diphone_logits"],
                     model.num_phonemes,
                 )
 
@@ -328,12 +320,17 @@ def main():
         num_phonemes=cfg.num_phonemes,
         num_diphones=cfg.num_diphones,
         num_days=cfg.num_days,
+        variant=args.variant,
         kernel_len=cfg.encoder.kernel_len,
         stride_len=cfg.encoder.stride_len,
         gaussian_smooth_width=cfg.encoder.gaussian_smooth_width,
         dropout=cfg.encoder.dropout,
     ).to(device)
-    model.load_state_dict(_load_checkpoint(args.checkpoint, device))
+    # Old checkpoints may contain extra heads not used by the current
+    # variant (e.g. mono_head from a previous build of variant E). Load
+    # non-strictly so unused weights are silently ignored.
+    state = _load_checkpoint(args.checkpoint, device)
+    model.load_state_dict(state, strict=False)
 
     loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
                              num_phonemes=cfg.num_phonemes, shuffle=False)
