@@ -320,20 +320,14 @@ log-priors from the training-set phoneme distribution and subtract them at
 decode time; this is opt-in via `--log_priors` and should be treated as
 experimental, since `TLG.fst` is built assuming zero priors.
 
-> **Note on WER ceiling.** This pipeline is 3-gram WFST only (no
-> `G_no_prune.fst` lattice rescoring, since the languageModel/ tarball does
-> not include the unpruned graph). With a 3-gram LM and no LLM rescoring,
-> WER on this dataset is structurally bounded around 30–40%; DCoND-style
-> sub-15% WER requires the 5-gram path with `G_no_prune.fst` lattice
-> rescoring **plus** a 6B-parameter LLM rescore (e.g. OPT 6B in
-> `cffan/eval_competition.py`), which is out of scope here.
+Single-run WER decode:
 
 ```bash
 conda activate lm_decode
 cd ~/brain2text-skipdiphone
 
 python src/decode.py \
-  --checkpoint experiments/<run>/best.pt \
+  --checkpoint experiments/<run>/best_dev.pt \
   --variant <A|B|C|D|E> \
   --config configs/default.yaml \
   --lm 3gram \
@@ -342,19 +336,52 @@ python src/decode.py \
 
 Implementation note: WER decoding uses raw acoustic logits. For diphone-based variants, raw diphone logits are marginalized to phoneme-level logits using log-sum-exp before Kaldi/WFST decoding.
 
-### WER hyperparameter sweep
+### Recommended workflow: 3-gram sweep all → 5-gram sweep best variant
 
-PER gains from the acoustic objective only show up in WER if `acoustic_scale`
-(and to a lesser extent `blank_penalty`) is recalibrated for the new model.
-`scripts/wer_sweep.py` loads a checkpoint once and grid-scans the WFST
-hyperparameters, writing a CSV that the notebook reads back as a heatmap.
+`acoustic_scale` and `blank_penalty` are LM-specific. The optimal values
+shift between 3-gram and 5-gram (compare speechBCI 3-gram defaults
+`ac=0.8, bp=log(2)` vs cffan 5-gram defaults `ac=0.5, bp=log(7)`). So the
+recommended pipeline is:
+
+**Step 1 — 3-gram sweep on every variant** (fast; ranks the ablation table
+and fills the per-variant WER column):
 
 ```bash
 conda activate lm_decode
-cd ~/brain2text-skipdiphone
+nohup bash scripts/wer_sweep_all.sh > experiments/wer_sweep_all.log 2>&1 &
+```
 
+This iterates all 10 seed42 runs sequentially, writes per-run CSVs to
+`experiments/<run>/wer_sweep_3gram.csv`, and prints a final summary of
+the best (acoustic_scale, blank_penalty, WER) cell per run.
+
+**Step 2 — 5-gram sweep on the best variant only** (re-tune around cffan's
+5-gram defaults; the 5-gram TLG.fst is ~42GB so we don't sweep it on every
+variant):
+
+```bash
+nohup python scripts/wer_sweep.py \
+    --checkpoint experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/best_dev.pt \
+    --variant E \
+    --lm 5gram \
+    --lm_dir data/speech_5gram/lang_test \
+    --acoustic_scales 0.3 0.5 0.8 \
+    --blank_penalties 0.69 1.39 1.95 \
+    --out experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.csv \
+    > experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.log 2>&1 &
+```
+
+`wer_sweep.py` builds the WFST decoder once per `acoustic_scale` and reuses
+it across all `blank_penalty` values, so the 5-gram (~42GB) FST is loaded
+3 times instead of 9 on a 3×3 grid.
+
+### Manual single-cell sweep
+
+If you just want to explore one combination instead of the full pipeline:
+
+```bash
 python scripts/wer_sweep.py \
-  --checkpoint experiments/<run>/best.pt \
+  --checkpoint experiments/<run>/best_dev.pt \
   --variant <A|B|C|D|E> \
   --lm 3gram --lm_dir data/languageModel \
   --acoustic_scales 0.3 0.5 0.8 1.0 1.2 \
@@ -362,7 +389,7 @@ python scripts/wer_sweep.py \
   --out experiments/<run>/wer_sweep.csv
 ```
 
-Both ranges are centered on speechBCI's baseline (`acoustic_scale=0.8`,
+Both ranges are centered on speechBCI's 3-gram baseline (`acoustic_scale=0.8`,
 `blank_penalty=log(2)≈0.69`). `log_priors` defaults to zeros to match
 speechBCI; pass `--log_priors` to opt into training-set prior subtraction.
 
@@ -438,13 +465,12 @@ Variant E improves test PER from 20.48% (A) to 19.75% (E) — a **0.73 absolute-
 - C's λ ∈ {1e-3, 5e-3, 1e-2} produces nearly identical PER (20.36 / 20.45 / 20.36); smoothness alone is not strongly tunable on this acoustic head.
 - E (smoothness + skip-diphone) outperforms either component alone, suggesting they are complementary.
 
-Earlier decoding experiments showed that WER improved only modestly under
-3-gram/5-gram WFST decoding and GPT-2 rescoring. Those experiments ran
-under **uncalibrated WFST settings** (`acoustic_scale=1.5`,
-`blank_penalty=0`, zero log-priors), which inflates WER on this acoustic
-model; whether the conclusion still holds under the calibrated defaults
-(`acoustic_scale=0.8`, `blank_penalty=log(2)`, `log_priors=zeros` to match
-speechBCI/cffan) is being re-verified.
+WER columns will be filled by `scripts/wer_sweep_all.sh` (3-gram, all
+variants) for ranking, and a separate 5-gram sweep on the best variant
+for the headline WER. The 5-gram-optimal `(acoustic_scale, blank_penalty)`
+differs from 3-gram (cffan reports `ac=0.5, bp=log(7)` for 5-gram vs
+speechBCI's `ac=0.8, bp=log(2)` for 3-gram), so re-tuning is required
+rather than reusing the 3-gram-best parameters.
 
 ---
 
