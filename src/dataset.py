@@ -15,6 +15,15 @@ Each per-day dataset has:
   phoneLens:      np.ndarray (N,)              -- actual phoneme counts
   timeSeriesLens: np.ndarray (N,)              -- actual frame counts
   transcriptions: list of str
+
+Dev split
+---------
+To avoid using the same split for both checkpoint selection and final
+reporting, we further partition `train` into train / dev: every
+`dev_stride`-th trial within each recording day goes to dev. With
+`dev_stride=10` this yields a deterministic ~10% dev set balanced across
+days. Set `dev_stride=0` to disable (dev becomes empty; old behavior of
+using `test` as the validation set is then up to the caller).
 """
 
 import pickle
@@ -26,20 +35,36 @@ from torch.nn.utils.rnn import pad_sequence
 
 
 class BrainToTextDataset(Dataset):
-    def __init__(self, pkl_path, split="train", num_phonemes=40, debug_subset=False):
+    def __init__(self, pkl_path, split="train", num_phonemes=40, debug_subset=False,
+                 dev_stride=10):
         self.num_phonemes = num_phonemes
+        self.dev_stride = dev_stride
         self.samples = self._load(pkl_path, split, debug_subset)
 
     def _load(self, pkl_path, split, debug_subset):
         with open(pkl_path, "rb") as f:
             all_data = pickle.load(f)
 
-        day_datasets = all_data[split]   # list of per-day dicts
+        # "dev" is a deterministic partition of "train"; other splits load
+        # their own bucket directly.
+        source_split = "train" if split in ("train", "dev") else split
+        if source_split not in all_data:
+            raise KeyError(f"split {split!r} not present in {pkl_path}")
+        day_datasets = all_data[source_split]
         samples = []
 
         for day_id, day_data in enumerate(day_datasets):
             n_trials = len(day_data["sentenceDat"])
             for i in range(n_trials):
+                if source_split == "train":
+                    if split == "dev":
+                        # dev_stride <= 0 means "no dev split"; dev is then empty.
+                        if self.dev_stride <= 0 or i % self.dev_stride != 0:
+                            continue
+                    elif split == "train" and self.dev_stride > 0:
+                        if i % self.dev_stride == 0:
+                            continue
+
                 neural    = day_data["sentenceDat"][i].astype(np.float32)  # (T, 256)
                 phone_len = int(day_data["phoneLens"][i])
                 # pkl stores phonemes as 1-indexed (formatCompetitionData adds +1
@@ -116,8 +141,10 @@ def collate_fn(batch):
 
 
 def make_dataloader(pkl_path, split, batch_size, num_phonemes=40,
-                    debug_subset=False, shuffle=True, num_workers=4):
-    ds = BrainToTextDataset(pkl_path, split, num_phonemes, debug_subset)
+                    debug_subset=False, shuffle=True, num_workers=4,
+                    dev_stride=10):
+    ds = BrainToTextDataset(pkl_path, split, num_phonemes, debug_subset,
+                            dev_stride=dev_stride)
     return DataLoader(ds, batch_size=batch_size, shuffle=shuffle,
                       collate_fn=collate_fn, num_workers=num_workers,
                       pin_memory=True)
