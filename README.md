@@ -236,10 +236,20 @@ bash scripts/beta_sweep.sh   # trains D with beta in {0.05, 0.1, 0.2, 0.3}
 
 ### Multi-seed runs (variance estimation)
 
+All five variants are trained with seeds `{42, 1, 2}` to estimate variance.
+Seed 42 is already covered by the initial single runs above; only seeds 1 and 2
+need to be added. On a 4-GPU machine:
+
 ```bash
-bash scripts/multi_seed.sh   # trains Variant E with seeds {42, 1, 2}
-# Override:
-SEEDS="42 1 2 3 4" VARIANT=E LAMBDA=5e-3 bash scripts/multi_seed.sh
+# Batch 1: 4 GPUs in parallel (each GPU runs 2 seeds sequentially)
+GPU_ID=0 VARIANT=A SEEDS="1 2" bash scripts/multi_seed.sh &
+GPU_ID=1 VARIANT=B SEEDS="1 2" bash scripts/multi_seed.sh &
+GPU_ID=2 VARIANT=C SEEDS="1 2" bash scripts/multi_seed.sh &
+GPU_ID=3 VARIANT=D SEEDS="1 2" bash scripts/multi_seed.sh &
+wait
+
+# Batch 2: Variant E
+GPU_ID=0 VARIANT=E LAMBDA=5e-3 SEEDS="1 2" bash scripts/multi_seed.sh
 ```
 
 The notebook (`notebooks/results.ipynb`) groups runs by
