@@ -357,9 +357,13 @@ def main():
                     type=float,
                     help="blank penalty for lm_decoder; "
                          "speechBCI baseline is log(2) ~= 0.693")
-    parser.add_argument("--no_log_priors", action="store_true",
-                        help="disable training-prior subtraction; pass zeros "
-                             "to lm_decoder (legacy behavior).")
+    parser.add_argument("--log_priors", action="store_true",
+                        help="estimate per-class log-priors from the training "
+                             "split and pass them to lm_decoder. Off by "
+                             "default (zeros, matching speechBCI's "
+                             "rnn_step3_baselineRNNInference and "
+                             "cffan/eval_competition). Treat as an "
+                             "experimental opt-in.")
     parser.add_argument("--split", default="test",
                         choices=["train", "dev", "test"],
                         help="which split to evaluate on (default: test)")
@@ -400,11 +404,11 @@ def main():
           f"checkpoint={args.checkpoint}")
 
     log_priors = None
-    if args.lm is not None and not args.no_log_priors:
+    if args.lm is not None and args.log_priors:
         log_priors = compute_log_priors(cfg.data_path, cfg.num_phonemes,
                                         dev_stride=dev_stride)
         print(f"[decode] log_priors computed from train split, "
-              f"shape={log_priors.shape}")
+              f"shape={log_priors.shape} (opt-in)")
 
     per, wer = decode(
         model,
@@ -432,7 +436,7 @@ def main():
                "variant": args.variant, "per": per, "wer": wer,
                "acoustic_scale": args.acoustic_scale,
                "blank_penalty": args.blank_penalty, "beam": args.beam,
-               "log_priors": (not args.no_log_priors) and args.lm is not None}
+               "log_priors": bool(args.log_priors and args.lm is not None)}
         _Path(args.save_summary).parent.mkdir(parents=True, exist_ok=True)
         _Path(args.save_summary).write_text(_json.dumps(out, indent=2))
         print(f"Wrote summary to {args.save_summary}")
