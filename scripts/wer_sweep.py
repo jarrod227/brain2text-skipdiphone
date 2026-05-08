@@ -39,7 +39,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 
 from dataset import make_dataloader  # noqa: E402
-from decode import decode, _load_checkpoint, compute_log_priors  # noqa: E402
+from decode import (  # noqa: E402
+    decode,
+    _build_lm_decoder,
+    _load_checkpoint,
+    compute_log_priors,
+)
 from model import SkipDiphoneDecoder  # noqa: E402
 
 
@@ -108,6 +113,14 @@ def main():
     print(f"{'ac_scale':>10} {'blank_pen':>10} {'PER %':>8} {'WER %':>8}")
     print("-" * 40)
     for ac in args.acoustic_scales:
+        # Build the WFST decoder once per acoustic_scale and reuse it
+        # across all blank_penalty values. The 5-gram TLG.fst is ~42GB,
+        # so this avoids 15 redundant 42GB loads on a 5x4 grid.
+        print(f"[wer_sweep] loading decoder for acoustic_scale={ac:.2f} ...",
+              flush=True)
+        decoder_lm = _build_lm_decoder(
+            lm_dir, nbest=1, acoustic_scale=ac, beam=args.beam,
+        )
         for bp in args.blank_penalties:
             per, wer = decode(
                 model,
@@ -120,6 +133,7 @@ def main():
                 beam=args.beam,
                 blank_penalty=bp,
                 log_priors=log_priors,
+                decoder=decoder_lm,
             )
             print(f"{ac:>10.2f} {bp:>10.2f} {per * 100:>7.2f}% {wer * 100:>7.2f}%")
             rows.append({
@@ -130,6 +144,8 @@ def main():
                 "PER": per,
                 "WER": wer,
             })
+        # Drop the decoder before building the next one to free FST memory.
+        del decoder_lm
 
     # Best WER cell
     best = min(rows, key=lambda r: r["WER"])
