@@ -200,6 +200,7 @@ def decode(
     beam=17.0,
     blank_penalty=None,
     log_priors=None,
+    decoder=None,
 ):
     model.eval()
 
@@ -217,12 +218,15 @@ def decode(
     lm_module = None
     if lm is not None:
         import lm_decoder as lm_module
-        decoder_lm = _build_lm_decoder(
-            lm_dir,
-            nbest=nbest,
-            acoustic_scale=acoustic_scale,
-            beam=beam,
-        )
+        if decoder is not None:
+            decoder_lm = decoder
+        else:
+            decoder_lm = _build_lm_decoder(
+                lm_dir,
+                nbest=nbest,
+                acoustic_scale=acoustic_scale,
+                beam=beam,
+            )
 
     # speechBCI's actual baseline uses log(2). Older code defaulted to 0.0
     # which leaves a strong blank-vs-text imbalance during WFST decoding.
