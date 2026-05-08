@@ -59,6 +59,8 @@ def main():
         type=float,
         default=[0.0, 1.0, 2.0],
     )
+    parser.add_argument("--split", default="test", choices=["train", "dev", "test"],
+                        help="which split to sweep on (default: test)")
     parser.add_argument("--out", default=None,
                         help="optional CSV file to dump the full grid")
     args = parser.parse_args()
@@ -66,6 +68,7 @@ def main():
     cfg = OmegaConf.load(args.config)
     lm_dir = args.lm_dir or cfg.lm_dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dev_stride = int(cfg.get("dev_stride", 10))
 
     model = SkipDiphoneDecoder(
         input_dim=cfg.encoder.input_dim,
@@ -83,8 +86,9 @@ def main():
     model.load_state_dict(_load_checkpoint(args.checkpoint, device), strict=False)
     model.eval()
 
-    loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
-                             num_phonemes=cfg.num_phonemes, shuffle=False)
+    loader = make_dataloader(cfg.data_path, args.split, cfg.batch_size,
+                             num_phonemes=cfg.num_phonemes, shuffle=False,
+                             dev_stride=dev_stride)
 
     rows = []
     print(f"{'ac_scale':>10} {'blank_pen':>10} {'PER %':>8} {'WER %':>8}")
