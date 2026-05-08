@@ -365,15 +365,18 @@ nohup python scripts/wer_sweep.py \
     --variant E \
     --lm 5gram \
     --lm_dir data/speech_5gram/lang_test \
-    --acoustic_scales 0.3 0.5 0.8 \
-    --blank_penalties 0.69 1.39 1.95 \
+    --acoustic_scales 0.1 0.2 0.3 0.5 0.8 \
+    --blank_penalties 0.0 0.69 1.0 2.0 \
     --out experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.csv \
     > experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.log 2>&1 &
 ```
 
+The acoustic_scale range extends below cffan's 5-gram default (0.5) because
+the 5-gram LM is more informative than 3-gram, so the optimum can sit even
+lower (more weight on the LM, less on the acoustic logits).
 `wer_sweep.py` builds the WFST decoder once per `acoustic_scale` and reuses
 it across all `blank_penalty` values, so the 5-gram (~42GB) FST is loaded
-3 times instead of 9 on a 3×3 grid.
+5 times instead of 20 on this 5×4 grid.
 
 ### Manual single-cell sweep
 
