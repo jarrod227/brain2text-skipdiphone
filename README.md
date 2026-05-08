@@ -274,13 +274,23 @@ without re-running decode.
 
 Run this in the `lm_decode` environment.
 
-WER decoding uses the official `speechBCI` WFST decoder with speechBCI-style default settings:
+WER decoding uses the official `speechBCI` WFST decoder. Defaults are aligned
+with speechBCI's actual baseline (`rnn_step3_baselineRNNInference.ipynb`):
 
 ```text
-acoustic_scale = 1.5
-beam = 17
-blank_penalty = 0.0
+acoustic_scale = 0.8
+beam           = 17
+blank_penalty  = log(2) ~= 0.693
+log_priors     = log of training-set phoneme frequencies (Kaldi class order)
 ```
+
+Earlier versions of this repo passed `acoustic_scale=1.5`, `blank_penalty=0.0`,
+and zero log-priors to `lm_decoder.DecodeNumpy`, which is *not* what speechBCI
+actually uses and inflates WER significantly. `decode.py` now estimates
+`log_priors` from the training-split phoneme distribution (with the blank
+prior pinned to 0, in Kaldi class order `[blank, SIL, phone_0, ...]`) and
+passes it through; use `--no_log_priors` to revert to the legacy zero-prior
+behavior.
 
 ```bash
 conda activate lm_decode
@@ -311,10 +321,15 @@ python scripts/wer_sweep.py \
   --checkpoint experiments/<run>/best.pt \
   --variant <A|B|C|D|E> \
   --lm 3gram --lm_dir data/languageModel \
-  --acoustic_scales 0.5 0.8 1.0 1.2 1.5 \
-  --blank_penalties 0.0 1.0 2.0 \
+  --acoustic_scales 0.3 0.5 0.8 1.0 1.2 \
+  --blank_penalties 0.0 0.69 1.0 2.0 \
   --out experiments/<run>/wer_sweep.csv
 ```
+
+Both ranges are centered on speechBCI's baseline (`acoustic_scale=0.8`,
+`blank_penalty=log(2)≈0.69`). The sweep also subtracts training-set
+log-priors by default; pass `--no_log_priors` for the legacy zero-prior
+behavior.
 
 ---
 
