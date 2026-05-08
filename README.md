@@ -153,6 +153,13 @@ Setting `dev_stride: 0` falls back to the legacy protocol of using `test`
 for both validation and reporting; the trainer warns when this is in
 effect.
 
+> **Migration note.** Checkpoints saved before the dev-split methodology
+> change are `best.pt`, selected on test PER, and **should not be used
+> for final reporting** — they constitute a test-set leak. Re-train under
+> the current protocol to produce `best_dev.pt`. The Results table below
+> is from the legacy protocol and will be replaced once multi-seed
+> retraining completes.
+
 ---
 
 ## Training
@@ -378,6 +385,14 @@ GPT-2 rescoring is optional and is not claimed as a project contribution. The pr
 
 ## Results
 
+> ⚠️ **Stale.** The numbers below come from the legacy single-seed protocol
+> where `best.pt` was selected on the test split (data leak), under
+> uncalibrated WFST settings (`acoustic_scale=1.5`, `blank_penalty=0`,
+> zero log-priors). They will be replaced by mean ± std over seeds
+> `{42, 1, 2}` decoded with the current calibrated WFST defaults
+> (`acoustic_scale=0.8`, `blank_penalty=log(2)`, training-set log-priors)
+> once retraining completes.
+
 Current acoustic decoding results on the test split:
 
 | Rank | Variant | Core setting | Best PER (greedy) | WER | Notes |
@@ -392,7 +407,13 @@ Current acoustic decoding results on the test split:
 
 Variant E improves PER from 20.94% to 18.99%, corresponding to a 1.95 absolute-point reduction and a 9.3% relative reduction over the monophone baseline.
 
-Earlier decoding experiments showed that WER improves only modestly under 3-gram/5-gram WFST decoding and GPT-2 rescoring. This suggests that phoneme-level acoustic gains do not directly translate into word-level gains without stronger acoustic-LM calibration, a stronger baseline decoder, or the full unpruned/LLM rescoring pipeline.
+Earlier decoding experiments showed that WER improved only modestly under
+3-gram/5-gram WFST decoding and GPT-2 rescoring. Those experiments ran
+under **uncalibrated WFST settings** (`acoustic_scale=1.5`,
+`blank_penalty=0`, zero log-priors), which inflates WER on this acoustic
+model; whether the conclusion still holds under the calibrated defaults
+(`acoustic_scale=0.8`, `blank_penalty=log(2)`, training-set log-priors)
+is being re-verified.
 
 ---
 
