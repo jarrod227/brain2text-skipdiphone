@@ -65,8 +65,9 @@ def main():
     )
     parser.add_argument("--split", default="test", choices=["train", "dev", "test"],
                         help="which split to sweep on (default: test)")
-    parser.add_argument("--no_log_priors", action="store_true",
-                        help="skip training-prior subtraction (legacy zeros).")
+    parser.add_argument("--log_priors", action="store_true",
+                        help="opt-in: subtract training-set log-priors. Off "
+                             "by default to match speechBCI/cffan (zeros).")
     parser.add_argument("--out", default=None,
                         help="optional CSV file to dump the full grid")
     args = parser.parse_args()
@@ -97,11 +98,11 @@ def main():
                              dev_stride=dev_stride)
 
     log_priors = None
-    if not args.no_log_priors:
+    if args.log_priors:
         log_priors = compute_log_priors(cfg.data_path, cfg.num_phonemes,
                                         dev_stride=dev_stride)
         print(f"[wer_sweep] log_priors computed from train split, "
-              f"shape={log_priors.shape}")
+              f"shape={log_priors.shape} (opt-in)")
 
     rows = []
     print(f"{'ac_scale':>10} {'blank_pen':>10} {'PER %':>8} {'WER %':>8}")
