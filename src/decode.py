@@ -106,7 +106,8 @@ def _marginalize_diphone_logits(diphone_logits, num_phonemes):
     return torch.cat([phone_logits, blank_logits], dim=-1)
 
 
-def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=17.0):
+def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=17.0,
+                      rescore=False):
     """
     Build a WFST decoder using the official speechBCI lm_decoder package.
 
@@ -119,6 +120,11 @@ def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=17.0):
     Other DecodeOptions are kept aligned with speechBCI defaults:
         max_active=7000, min_active=200, lattice_beam=8.0,
         ctc_blank_skip_threshold=1.0, length_penalty=0.0.
+
+    rescore=False (default) skips loading G_no_prune.fst entirely. The 5-gram
+    unpruned graph is ~75GB; loading it during a hyperparameter sweep wastes
+    memory because Rescore() is never called. Pass rescore=True only when
+    you actually need lattice rescoring with G_no_prune.fst.
     """
     import lm_decoder  # noqa: only available in the lm_decode conda env
 
@@ -134,10 +140,14 @@ def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=17.0):
     )
 
     lm_path = Path(lm_dir)
+    rescore_g_path = ""
+    if rescore and (lm_path / "G_no_prune.fst").exists():
+        rescore_g_path = str(lm_path / "G_no_prune.fst")
+
     resource = lm_decoder.DecodeResource(
         str(lm_path / "TLG.fst"),
         str(lm_path / "G.fst") if (lm_path / "G.fst").exists() else "",
-        str(lm_path / "G_no_prune.fst") if (lm_path / "G_no_prune.fst").exists() else "",
+        rescore_g_path,
         str(lm_path / "words.txt"),
         "",
     )
@@ -201,6 +211,7 @@ def decode(
     blank_penalty=None,
     log_priors=None,
     decoder=None,
+    rescore=False,
 ):
     model.eval()
 
@@ -226,6 +237,7 @@ def decode(
                 nbest=nbest,
                 acoustic_scale=acoustic_scale,
                 beam=beam,
+                rescore=rescore,
             )
 
     # speechBCI's actual baseline uses log(2). Older code defaulted to 0.0
@@ -309,6 +321,8 @@ def decode(
                     float(blank_penalty),
                 )
                 decoder_lm.FinishDecoding()
+                if rescore:
+                    decoder_lm.Rescore()
 
                 results = decoder_lm.result()
                 hyp_text = _normalize_transcript(results[0].sentence) if results else ""
@@ -388,6 +402,11 @@ def main():
                              "rnn_step3_baselineRNNInference and "
                              "cffan/eval_competition). Treat as an "
                              "experimental opt-in.")
+    parser.add_argument("--rescore", action="store_true",
+                        help="run lattice rescoring with G_no_prune.fst after "
+                             "WFST decoding. Off by default because the "
+                             "5-gram unpruned graph is ~75GB and only needed "
+                             "for final eval, not for hyperparameter sweeps.")
     parser.add_argument("--split", default="test",
                         choices=["train", "dev", "test"],
                         help="which split to evaluate on (default: test)")
@@ -448,6 +467,7 @@ def main():
         beam=args.beam,
         blank_penalty=args.blank_penalty,
         log_priors=log_priors,
+        rescore=args.rescore,
     )
     print(f"PER: {per * 100:.2f}%")
     if args.lm is not None:
