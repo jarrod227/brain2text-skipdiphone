@@ -240,12 +240,30 @@ class TorchGRUEncoder(nn.Module):
 
 
 class SkipDiphoneDecoder(nn.Module):
+    """
+    Variant-aware decoder. Only the heads each variant actually uses are
+    constructed and forwarded:
+
+        A           : mono_head
+        B, C        : diphone_head
+        D, E        : diphone_head + skip_head
+
+    `forward` returns a dict whose keys depend on variant; downstream code
+    should look up by name rather than positional unpack.
+    """
+
+    VALID_VARIANTS = ("A", "B", "C", "D", "E")
+
     def __init__(self, input_dim, hidden_dim, num_layers, num_phonemes,
-                 num_diphones, num_days, kernel_len=32, stride_len=4,
-                 gaussian_smooth_width=2.0, dropout=0.4):
+                 num_diphones, num_days, variant="E", kernel_len=32,
+                 stride_len=4, gaussian_smooth_width=2.0, dropout=0.4):
         super().__init__()
+        if variant not in self.VALID_VARIANTS:
+            raise ValueError(f"variant must be one of {self.VALID_VARIANTS}, got {variant!r}")
+
         self.num_phonemes = num_phonemes
         self.num_diphones = num_diphones
+        self.variant = variant
 
         self.preprocessor = InputPreprocessor(
             input_dim, num_days, kernel_len, stride_len, gaussian_smooth_width
@@ -263,14 +281,23 @@ class SkipDiphoneDecoder(nn.Module):
 
         enc_out_dim = 2 * hidden_dim  # bidirectional
 
-        # Head A: monophone CTC (baseline)
-        self.mono_head    = nn.Linear(enc_out_dim, num_phonemes + 1)  # +1 for CTC blank
+        if variant == "A":
+            # Mono-only baseline.
+            self.mono_head = nn.Linear(enc_out_dim, num_phonemes + 1)
+        else:
+            # All diphone variants share the standard diphone head.
+            self.diphone_head = nn.Linear(enc_out_dim, num_diphones + 1)
+            if variant in ("D", "E"):
+                # Skip-diphone auxiliary CTC: z_{t-2} -> z_t
+                self.skip_head = nn.Linear(enc_out_dim, num_diphones + 1)
 
-        # Head B/C/D/E: standard diphone CTC (z_{t-1} -> z_t)
-        self.diphone_head = nn.Linear(enc_out_dim, num_diphones + 1)
+    @property
+    def uses_diphone(self):
+        return self.variant != "A"
 
-        # Head D/E: skip-diphone auxiliary CTC (z_{t-2} -> z_t)
-        self.skip_head    = nn.Linear(enc_out_dim, num_diphones + 1)
+    @property
+    def uses_skip(self):
+        return self.variant in ("D", "E")
 
     def forward(self, x, lengths, day_ids, return_logits=False):
         """
@@ -278,46 +305,46 @@ class SkipDiphoneDecoder(nn.Module):
             x:       (B, T, input_dim)
             lengths: (B,) actual sequence lengths before padding
             day_ids: (B,) integer recording-day index per sample
-            return_logits: if True, also return raw mono/diphone/skip logits for LM decoding
+            return_logits: if True, also include raw logits for LM decoding
 
         Returns:
-            mono_log_probs:    (T', B, num_phonemes+1)
-            diphone_log_probs: (T', B, num_diphones+1)
-            skip_log_probs:    (T', B, num_diphones+1)
-            phoneme_probs:     (B, T', num_phonemes+1)
-            enc_lengths:       (B,)
-
-            if return_logits=True:
-            mono_logits:       (B, T', num_phonemes+1)
-            diphone_logits:    (B, T', num_diphones+1)
-            skip_logits:       (B, T', num_diphones+1)
+            dict with the following keys (variant-dependent):
+                "enc_lengths":       (B,)                                    [always]
+                "mono_log_probs":    (T', B, num_phonemes+1)                 [A only]
+                "diphone_log_probs": (T', B, num_diphones+1)                 [B/C/D/E]
+                "skip_log_probs":    (T', B, num_diphones+1)                 [D/E]
+                "phoneme_probs":     (B, T', num_phonemes+1)                 [B/C/D/E]
+                "mono_logits":       (B, T', num_phonemes+1)                 [A, return_logits]
+                "diphone_logits":    (B, T', num_diphones+1)                 [B/C/D/E, return_logits]
+                "skip_logits":       (B, T', num_diphones+1)                 [D/E, return_logits]
         """
         x, enc_lengths = self.preprocessor(x, day_ids, lengths)
         enc_out = self.encoder(x, enc_lengths)
 
-        mono_logits = self.mono_head(enc_out)
+        outputs = {"enc_lengths": enc_lengths}
+
+        if self.variant == "A":
+            mono_logits = self.mono_head(enc_out)
+            outputs["mono_log_probs"] = F.log_softmax(mono_logits, dim=-1).permute(1, 0, 2)
+            if return_logits:
+                outputs["mono_logits"] = mono_logits
+            return outputs
+
         diphone_logits = self.diphone_head(enc_out)
-        skip_logits = self.skip_head(enc_out)
-
-        mono_log_probs = F.log_softmax(mono_logits, dim=-1).permute(1, 0, 2)
         diphone_log_probs = F.log_softmax(diphone_logits, dim=-1).permute(1, 0, 2)
-        skip_log_probs = F.log_softmax(skip_logits, dim=-1).permute(1, 0, 2)
+        outputs["diphone_log_probs"] = diphone_log_probs
+        outputs["phoneme_probs"] = self._marginalize(diphone_log_probs.permute(1, 0, 2))
 
-        phoneme_probs = self._marginalize(diphone_log_probs.permute(1, 0, 2))
+        if self.uses_skip:
+            skip_logits = self.skip_head(enc_out)
+            outputs["skip_log_probs"] = F.log_softmax(skip_logits, dim=-1).permute(1, 0, 2)
+            if return_logits:
+                outputs["skip_logits"] = skip_logits
 
         if return_logits:
-            return (
-                mono_log_probs,
-                diphone_log_probs,
-                skip_log_probs,
-                phoneme_probs,
-                enc_lengths,
-                mono_logits,
-                diphone_logits,
-                skip_logits,
-            )
+            outputs["diphone_logits"] = diphone_logits
 
-        return mono_log_probs, diphone_log_probs, skip_log_probs, phoneme_probs, enc_lengths
+        return outputs
 
     def _marginalize(self, diphone_log_probs):
         """
