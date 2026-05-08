@@ -73,6 +73,11 @@ def main():
     parser.add_argument("--log_priors", action="store_true",
                         help="opt-in: subtract training-set log-priors. Off "
                              "by default to match speechBCI/cffan (zeros).")
+    parser.add_argument("--rescore", action="store_true",
+                        help="opt-in: run lattice rescoring with G_no_prune.fst "
+                             "(loads ~75GB into RAM). Off by default; the "
+                             "sweep's job is to find optimal (ac, bp), not "
+                             "to do final eval with rescore.")
     parser.add_argument("--out", default=None,
                         help="optional CSV file to dump the full grid")
     args = parser.parse_args()
@@ -120,6 +125,7 @@ def main():
               flush=True)
         decoder_lm = _build_lm_decoder(
             lm_dir, nbest=1, acoustic_scale=ac, beam=args.beam,
+            rescore=args.rescore,
         )
         for bp in args.blank_penalties:
             per, wer = decode(
@@ -134,6 +140,7 @@ def main():
                 blank_penalty=bp,
                 log_priors=log_priors,
                 decoder=decoder_lm,
+                rescore=args.rescore,
             )
             print(f"{ac:>10.2f} {bp:>10.2f} {per * 100:>7.2f}% {wer * 100:>7.2f}%")
             rows.append({
