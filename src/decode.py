@@ -24,10 +24,30 @@ from pathlib import Path
 
 import editdistance
 import numpy as np
+import re
 import torch
 
 from dataset import make_dataloader
 from model import SkipDiphoneDecoder
+
+
+_NORMALIZE_PUNCT_RE = re.compile(r"[^a-zA-Z\- ']")
+
+
+def _normalize_transcript(text):
+    """
+    Normalize a transcript to match the WFST decoder's output style.
+
+    The competition pkl (formatCompetitionData.ipynb) stores raw transcripts
+    with capitalization and punctuation, but the WFST decoder emits
+    lowercase strings without punctuation. Without this step, micro-WER is
+    inflated by every capitalized/punctuated reference word.
+
+    Mirrors cffan eval_competition.py and speechBCI makeTFRecordsFromSession.py.
+    """
+    text = _NORMALIZE_PUNCT_RE.sub("", text)
+    text = text.replace("--", "").lower().strip()
+    return text
 
 
 def word_error_rate(hyp_text, ref_text):
@@ -287,8 +307,8 @@ def decode(
                 decoder_lm.FinishDecoding()
 
                 results = decoder_lm.result()
-                hyp_text = results[0].sentence.strip() if results else ""
-                ref_text = batch["transcripts"][i].strip()
+                hyp_text = _normalize_transcript(results[0].sentence) if results else ""
+                ref_text = _normalize_transcript(batch["transcripts"][i])
 
                 hyp_words = hyp_text.split()
                 ref_words = ref_text.split()
