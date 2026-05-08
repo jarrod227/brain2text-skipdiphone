@@ -288,16 +288,28 @@ with speechBCI's actual baseline (`rnn_step3_baselineRNNInference.ipynb`):
 acoustic_scale = 0.8
 beam           = 17
 blank_penalty  = log(2) ~= 0.693
-log_priors     = log of training-set phoneme frequencies (Kaldi class order)
+log_priors     = zeros (matches speechBCI baseline + cffan eval_competition)
 ```
 
-Earlier versions of this repo passed `acoustic_scale=1.5`, `blank_penalty=0.0`,
-and zero log-priors to `lm_decoder.DecodeNumpy`, which is *not* what speechBCI
-actually uses and inflates WER significantly. `decode.py` now estimates
-`log_priors` from the training-split phoneme distribution (with the blank
-prior pinned to 0, in Kaldi class order `[blank, SIL, phone_0, ...]`) and
-passes it through; use `--no_log_priors` to revert to the legacy zero-prior
-behavior.
+Earlier versions of this repo passed `acoustic_scale=1.5` and
+`blank_penalty=0.0` — those values are not what speechBCI's baseline
+notebook actually uses and inflate WER. The defaults above are now correct.
+
+`log_priors` is left at zeros to match both reference implementations
+(`speechBCI/.../lmDecoderUtils.py:185-186` and
+`neural_seq_decoder/scripts/eval_competition.py:110-114` both pass `None`
+which becomes `np.zeros`). `decode.py` can also estimate per-class
+log-priors from the training-set phoneme distribution and subtract them at
+decode time; this is opt-in via `--log_priors` and should be treated as
+experimental, since `TLG.fst` is built assuming zero priors.
+
+> **Note on WER ceiling.** This pipeline is 3-gram WFST only (no
+> `G_no_prune.fst` lattice rescoring, since the languageModel/ tarball does
+> not include the unpruned graph). With a 3-gram LM and no LLM rescoring,
+> WER on this dataset is structurally bounded around 30–40%; DCoND-style
+> sub-15% WER requires the 5-gram path with `G_no_prune.fst` lattice
+> rescoring **plus** a 6B-parameter LLM rescore (e.g. OPT 6B in
+> `cffan/eval_competition.py`), which is out of scope here.
 
 ```bash
 conda activate lm_decode
@@ -334,9 +346,8 @@ python scripts/wer_sweep.py \
 ```
 
 Both ranges are centered on speechBCI's baseline (`acoustic_scale=0.8`,
-`blank_penalty=log(2)≈0.69`). The sweep also subtracts training-set
-log-priors by default; pass `--no_log_priors` for the legacy zero-prior
-behavior.
+`blank_penalty=log(2)≈0.69`). `log_priors` defaults to zeros to match
+speechBCI; pass `--log_priors` to opt into training-set prior subtraction.
 
 ---
 
