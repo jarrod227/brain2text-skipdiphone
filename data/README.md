@@ -35,13 +35,13 @@ Files not needed: `derived`, `diagnosticBlocks`, `sentences`, `tuningTasks`,
 ## Step 2: Convert .mat files to .pkl
 
 The downloaded `competitionData/` contains `.mat` files (one per recording
-session/day), loaded with `scipy.io.loadmat`. Use cffan's notebook to convert
-them to a single `.pkl` file and apply blockwise z-score normalization:
+session/day), loaded with `scipy.io.loadmat`. Use the notebook in this repo
+to convert them to a single `.pkl` file and apply blockwise z-score
+normalization:
 
 ```bash
-# Run from outside brain2text-skipdiphone/:
-git clone https://github.com/cffan/neural_seq_decoder.git
-# Open and run: neural_seq_decoder/notebooks/formatCompetitionData.ipynb
+# Open and run from the repo root:
+jupyter notebook notebooks/formatCompetitionData.ipynb
 # Point the notebook to your data/competitionData/ directory
 # Output: a single competitionData.pkl file
 ```
@@ -62,15 +62,21 @@ data_path: "data/competitionData.pkl"
 
 ```
 data/
-├── competitionData/          # extracted .mat files (one per day, 24 total)
-│   ├── t12.2022.04.28.mat
-│   ├── t12.2022.05.05.mat
-│   └── ...
-├── competitionData.pkl       # converted by formatCompetitionData.ipynb
-└── languageModel/            # optional, for WER
+├── competitionData/          # extracted .mat files
+│   ├── train/                # 24 .mat files (t12.2022.04.28.mat, ...)
+│   ├── test/                 # 24 .mat files
+│   └── competitionHoldOut/   # 15 .mat files (no labels)
+├── competitionData.pkl       # converted by notebooks/formatCompetitionData.ipynb
+└── languageModel/            # optional, for WER evaluation
     ├── TLG.fst
+    ├── G.fst
+    ├── LG.fst
+    ├── L.fst
+    ├── T.fst
     ├── tokens.txt
-    └── words.txt
+    ├── units.txt
+    ├── words.txt
+    └── lexicon_numbers.txt
 ```
 
 ## Neural features
@@ -81,5 +87,13 @@ Each trial provides:
 - Concatenated → 256 features per 20 ms time bin
 
 Phoneme set: 39 phonemes + SIL = 40 classes (blank at index 40).
+
+## Note on transcript normalization
+
+The pkl stores `transcriptions` as raw strings (original casing and
+punctuation from the .mat files). The WFST decoder emits lowercase
+strings without punctuation. `decode.py` applies `_normalize_transcript()`
+before WER comparison to align the two; without this step WER is
+artificially inflated.
 
 This directory is excluded from version control (see `.gitignore`).
