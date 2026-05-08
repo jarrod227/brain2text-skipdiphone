@@ -450,7 +450,7 @@ Current acoustic decoding results on the test split:
 | Rank | Variant | Core setting | Best PER (greedy) | WER | Notes |
 |------|---------|--------------|------------------:|----:|-------|
 | 1 | E | Skip-diphone + smoothness, λ=0.005 | 18.99% | TBD | Best acoustic model |
-| 2 | D | Skip-diphone, λ=0.001 | 19.50% | TBD | Skip-diphone auxiliary supervision |
+| 2 | D | Skip-diphone | 19.50% | TBD | Skip-diphone auxiliary supervision |
 | 3 | C | Diphone + smoothness, λ=0.01 | 19.58% | TBD | High smoothness weight |
 | 4 | C | Diphone + smoothness, λ=0.005 | 19.63% | TBD |  |
 | 5 | B | Diphone baseline | 19.64% | TBD |  |
