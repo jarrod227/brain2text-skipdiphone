@@ -127,6 +127,34 @@ mv data/speech_5gram/lang_test/G_no_prune.fst.bak \
 
 ---
 
+## Methodology
+
+To avoid using the same split for both checkpoint selection and final
+reporting, the pkl `train` bucket is partitioned into:
+
+- **train** (~90%) — used for gradient updates.
+- **dev** (~10%) — every `dev_stride`-th trial within each recording day,
+  deterministic across runs. Used to pick `best_dev.pt`.
+
+The pkl `test` split is evaluated only every `eval_test_every` epochs as a
+tracking signal during training. **Final test PER is reported by running
+`decode.py` on `best_dev.pt`**, which is what this README's results table
+should use. Each training run also writes `final.pt` at the last epoch and
+a `summary.json` with `{best_dev_epoch, best_dev_per, test_per_at_best_dev,
+final_dev_per, final_test_per}`.
+
+For seed-noise control, runs are repeated with multiple seeds. Run
+directories include the seed (`..._seed42`, `..._seed1`, ...) so the
+notebook can aggregate as mean ± std. Set `cudnn_deterministic: true` (or
+pass `--deterministic`) to force cuDNN GRU into deterministic mode (~20%
+slower) for tighter seed comparisons.
+
+Setting `dev_stride: 0` falls back to the legacy protocol of using `test`
+for both validation and reporting; the trainer warns when this is in
+effect.
+
+---
+
 ## Training
 
 Variant A runs 80 epochs. Variants B/C/D/E run 120–150 epochs because the diphone and skip-diphone variants have larger output spaces and additional objectives.
@@ -167,15 +195,42 @@ nohup python src/train.py \
   > experiments/variant_E_lam5e-3.log 2>&1 &
 ```
 
-`train.py` also accepts `--alpha` (std-diphone CTC weight) and `--beta`
-(skip-diphone CTC weight) overrides; these are reflected in the run name
-so sweep runs land in distinct directories under `experiments/`.
+`train.py` also accepts:
+- `--alpha` (std-diphone CTC weight) — variants B/C/D/E
+- `--beta` (skip-diphone CTC weight) — variants D/E
+- `--lambda_smooth` (smoothness weight) — variants C/E
+- `--seed` (RNG seed)
+- `--num_epochs` (override default by variant)
+- `--deterministic` (force deterministic cuDNN; ~20% slower)
+
+All of α / β / λ / seed are reflected in the run directory name, so sweep
+runs land in distinct directories under `experiments/`.
 
 ### β ablation (Variant D)
 
 ```bash
 bash scripts/beta_sweep.sh   # trains D with beta in {0.05, 0.1, 0.2, 0.3}
 ```
+
+### Multi-seed runs (variance estimation)
+
+```bash
+bash scripts/multi_seed.sh   # trains Variant E with seeds {42, 1, 2}
+# Override:
+SEEDS="42 1 2 3 4" VARIANT=E LAMBDA=5e-3 bash scripts/multi_seed.sh
+```
+
+The notebook (`notebooks/results.ipynb`) groups runs by
+`(variant, alpha, beta, lambda)` and reports mean ± std across seeds.
+
+### A@150 sanity check
+
+```bash
+bash scripts/sanity_a150.sh   # Variant A trained for 150 epochs (vs. default 80)
+```
+
+Confirms whether the gain of E (150 epochs) over A (80 epochs) comes from
+the objective rather than just training time.
 
 Monitor training:
 
@@ -195,17 +250,23 @@ CUDA_VISIBLE_DEVICES=<gpu_id>
 
 ### PER: greedy CTC
 
-PER is computed on the test split using greedy CTC decoding.
+PER is computed by greedy CTC decoding on the requested split.
 
 For Variant A, decoding uses the monophone head directly.  
 For Variants B–E, diphone outputs are marginalized to phoneme probabilities before CTC collapse.
 
 ```bash
 python src/decode.py \
-  --checkpoint experiments/<run>/best.pt \
+  --checkpoint experiments/<run>/best_dev.pt \
   --variant <A|B|C|D|E> \
+  --split test \
+  --save_summary experiments/<run>/test_summary.json \
   --config configs/default.yaml
 ```
+
+`--split` accepts `train` / `dev` / `test`. `--save_summary` writes a JSON
+with `{per, wer, split, ...}` so the notebook can read final test numbers
+without re-running decode.
 
 ---
 
