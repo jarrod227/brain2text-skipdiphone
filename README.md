@@ -160,6 +160,16 @@ effect.
 > is from the legacy protocol and will be replaced once multi-seed
 > retraining completes.
 
+> **Effect on absolute PER.** Under the dev-split protocol, absolute test
+> PER is typically ~1pp higher than under the legacy "lowest test PER
+> across epochs" selection, simply because the legacy protocol implicitly
+> cherry-picks epochs against the test split. Concurrent works on this
+> dataset that report numbers under the legacy convention are therefore
+> not directly comparable in absolute terms — but our **between-variant
+> gain (e.g. A → E)** is *larger* under the dev-split protocol than under
+> the legacy one, indicating the improvement is not an evaluation
+> artifact.
+
 ---
 
 ## Training
