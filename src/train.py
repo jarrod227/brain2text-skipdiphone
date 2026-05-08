@@ -50,14 +50,13 @@ def train_epoch(model, loader, optimizer, cfg, variant, lambda_smooth, device):
             neural = neural + torch.randn(neural.shape[0], 1, neural.shape[2],
                                           device=device) * constant_offset_sd
 
-        mono_lp, dip_lp, skip_lp, phone_p, enc_lengths = model(neural, lengths, day_ids)
+        outputs = model(neural, lengths, day_ids)
 
         targets = {k: v.to(device) for k, v in batch["targets"].items()}
         tlens   = {k: v.to(device) for k, v in batch["target_lengths"].items()}
 
         loss, _ = compute_loss(
-            mono_lp, dip_lp, skip_lp, phone_p,
-            targets, enc_lengths, tlens,
+            outputs, targets, tlens,
             cfg.alpha, cfg.beta, lambda_smooth, variant,
             cfg.num_phonemes, cfg.num_diphones,
         )
@@ -82,12 +81,12 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
         neural   = batch["neural"].to(device)
         lengths  = batch["lengths"].to(device)
         day_ids  = batch["day_ids"].to(device)
-        mono_lp, dip_lp, skip_lp, phone_p, enc_lengths = model(neural, lengths, day_ids)
+        outputs = model(neural, lengths, day_ids)
+        enc_lengths = outputs["enc_lengths"]
         targets = {k: v.to(device) for k, v in batch["targets"].items()}
         tlens   = {k: v.to(device) for k, v in batch["target_lengths"].items()}
         loss, _ = compute_loss(
-            mono_lp, dip_lp, skip_lp, phone_p,
-            targets, enc_lengths, tlens,
+            outputs, targets, tlens,
             cfg.alpha, cfg.beta, lambda_smooth, variant,
             cfg.num_phonemes, cfg.num_diphones,
         )
@@ -95,9 +94,9 @@ def eval_epoch(model, loader, cfg, variant, lambda_smooth, device):
 
         # Greedy CTC PER: micro, no SIL filter — matches cffan/neural_seq_decoder
         if variant == "A":
-            log_probs = mono_lp.permute(1, 0, 2)
+            log_probs = outputs["mono_log_probs"].permute(1, 0, 2)
         else:
-            log_probs = torch.log(phone_p.clamp(min=1e-10))
+            log_probs = torch.log(outputs["phoneme_probs"].clamp(min=1e-10))
         frame_ids = log_probs.argmax(dim=-1).cpu().tolist()
         enc_lens_list = enc_lengths.cpu().tolist()
         ref_phones = batch["targets"]["mono"].cpu().tolist()
@@ -119,14 +118,23 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config",        default="configs/default.yaml")
     parser.add_argument("--variant",       required=True, choices=["A","B","C","D","E"])
-    parser.add_argument("--lambda_smooth", default=None, type=float)
+    parser.add_argument("--lambda_smooth", default=None, type=float,
+                        help="override smoothness weight (variants C/E)")
+    parser.add_argument("--alpha",         default=None, type=float,
+                        help="override std-diphone CTC weight (variants B/C/D/E)")
+    parser.add_argument("--beta",          default=None, type=float,
+                        help="override skip-diphone CTC weight (variants D/E)")
     parser.add_argument("--num_epochs",    default=None, type=int,
                         help="override number of training epochs")
     args = parser.parse_args()
 
     cfg = OmegaConf.load(args.config)
-    variant      = args.variant
+    variant       = args.variant
     lambda_smooth = args.lambda_smooth if args.lambda_smooth is not None else cfg.lambda_smooth
+    if args.alpha is not None:
+        cfg.alpha = float(args.alpha)
+    if args.beta is not None:
+        cfg.beta = float(args.beta)
     if args.num_epochs is not None:
         num_epochs = args.num_epochs
     else:
@@ -149,6 +157,7 @@ def main():
         num_phonemes=cfg.num_phonemes,
         num_diphones=cfg.num_diphones,
         num_days=cfg.num_days,
+        variant=variant,
         kernel_len=cfg.encoder.kernel_len,
         stride_len=cfg.encoder.stride_len,
         gaussian_smooth_width=cfg.encoder.gaussian_smooth_width,
@@ -163,9 +172,7 @@ def main():
         weight_decay=cfg.weight_decay,
     )
     # Constant LR, matching cffan/neural_seq_decoder (lrStart == lrEnd == 0.02).
-    scheduler = torch.optim.lr_scheduler.LinearLR(
-        optimizer, start_factor=1.0, end_factor=1.0, total_iters=num_epochs
-    )
+    # No scheduler is needed — kept here only as a comment for clarity.
 
     run_name = build_run_name(cfg, variant, lambda_smooth)
     save_dir = Path(cfg.log_dir) / run_name
@@ -179,7 +186,6 @@ def main():
                                  variant, lambda_smooth, device)
         val_loss, val_per = eval_epoch(model, val_loader, cfg,
                                        variant, lambda_smooth, device)
-        scheduler.step()
 
         print(f"Epoch {epoch:03d} | train {train_loss:.4f} | "
               f"val {val_loss:.4f} | PER {val_per*100:.2f}%")
