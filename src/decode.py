@@ -25,7 +25,6 @@ from pathlib import Path
 import editdistance
 import numpy as np
 import torch
-from omegaconf import OmegaConf
 
 from dataset import make_dataloader
 from model import SkipDiphoneDecoder
@@ -306,12 +305,19 @@ def main():
                     help="WFST beam; speechBCI default is 17")
     parser.add_argument("--blank_penalty", default=0.0, type=float,
                     help="blank penalty for lm_decoder; speechBCI default is 0.0")
+    parser.add_argument("--split", default="test",
+                        choices=["train", "dev", "test"],
+                        help="which split to evaluate on (default: test)")
     parser.add_argument("--config", default="configs/default.yaml")
+    parser.add_argument("--save_summary", default=None,
+                        help="if set, write {per, wer} to this JSON path")
     args = parser.parse_args()
 
+    from omegaconf import OmegaConf
     cfg    = OmegaConf.load(args.config)
     lm_dir = args.lm_dir or cfg.lm_dir
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    dev_stride = int(cfg.get("dev_stride", 10))
 
     model = SkipDiphoneDecoder(
         input_dim=cfg.encoder.input_dim,
@@ -332,8 +338,11 @@ def main():
     state = _load_checkpoint(args.checkpoint, device)
     model.load_state_dict(state, strict=False)
 
-    loader = make_dataloader(cfg.data_path, "test", cfg.batch_size,
-                             num_phonemes=cfg.num_phonemes, shuffle=False)
+    loader = make_dataloader(cfg.data_path, args.split, cfg.batch_size,
+                             num_phonemes=cfg.num_phonemes, shuffle=False,
+                             dev_stride=dev_stride)
+    print(f"[decode] split={args.split}  size={len(loader.dataset)}  "
+          f"checkpoint={args.checkpoint}")
 
     per, wer = decode(
         model,
@@ -352,6 +361,17 @@ def main():
     print(f"PER: {per * 100:.2f}%")
     if args.lm is not None:
         print(f"WER (n-gram): {wer * 100:.2f}%")
+
+    if args.save_summary:
+        from pathlib import Path as _Path
+        import json as _json
+        out = {"split": args.split, "checkpoint": args.checkpoint,
+               "variant": args.variant, "per": per, "wer": wer,
+               "acoustic_scale": args.acoustic_scale,
+               "blank_penalty": args.blank_penalty, "beam": args.beam}
+        _Path(args.save_summary).parent.mkdir(parents=True, exist_ok=True)
+        _Path(args.save_summary).write_text(_json.dumps(out, indent=2))
+        print(f"Wrote summary to {args.save_summary}")
 
 
 if __name__ == "__main__":
