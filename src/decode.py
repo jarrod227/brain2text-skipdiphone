@@ -86,16 +86,17 @@ def _marginalize_diphone_logits(diphone_logits, num_phonemes):
     return torch.cat([phone_logits, blank_logits], dim=-1)
 
 
-def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=1.5, beam=17.0):
+def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=17.0):
     """
     Build a WFST decoder using the official speechBCI lm_decoder package.
 
-    Defaults follow the speechBCI WFST decoder settings:
-        acoustic_scale = 1.5
+    Defaults follow speechBCI's actual baseline settings (see
+    speechBCI/AnalysisExamples/rnn_step3_baselineRNNInference.ipynb):
+        acoustic_scale = 0.8
         beam           = 17.0
-        blank_penalty  = 0.0  (passed separately to DecodeNumpy)
+        blank_penalty  = log(2) ~= 0.693  (passed separately to DecodeNumpy)
 
-    Other DecodeOptions are also kept aligned with speechBCI defaults:
+    Other DecodeOptions are kept aligned with speechBCI defaults:
         max_active=7000, min_active=200, lattice_beam=8.0,
         ctc_blank_skip_threshold=1.0, length_penalty=0.0.
     """
@@ -124,6 +125,46 @@ def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=1.5, beam=17.0):
     return lm_decoder.BrainSpeechDecoder(resource, opts)
 
 
+def compute_log_priors(pkl_path, num_phonemes, dev_stride=10):
+    """
+    Estimate per-class log-priors from training-split phoneme frequencies.
+
+    speechBCI's WFST decoder expects log-priors in Kaldi class order, i.e.
+    [blank, SIL, phone_0, ..., phone_{C-2}]. The blank prior is set to 0
+    (no prior subtraction for blank), matching the speechBCI baseline.
+
+    Returns:
+        np.ndarray of shape (1, C+1) with log-priors in Kaldi order.
+    """
+    from dataset import BrainToTextDataset
+
+    ds = BrainToTextDataset(pkl_path, split="train", num_phonemes=num_phonemes,
+                            dev_stride=dev_stride)
+    counts = np.zeros(num_phonemes, dtype=np.float64)
+    for s in ds.samples:
+        ph = s["mono"].numpy()
+        if ph.size == 0:
+            continue
+        bc = np.bincount(ph, minlength=num_phonemes)
+        counts += bc[:num_phonemes]
+
+    total = counts.sum()
+    if total <= 0:
+        return np.zeros([1, num_phonemes + 1], dtype=np.float32)
+
+    priors = counts / total
+    log_priors_phones = np.log(np.clip(priors, 1e-10, None))
+
+    # Kaldi order: [blank, SIL, phone_0, ..., phone_{C-2}].
+    # Model phone order: [phone_0, ..., phone_{C-2}=ZH, phone_{C-1}=SIL].
+    blank_lp = np.zeros(1, dtype=np.float64)
+    sil_lp   = log_priors_phones[-1:]   # SIL is last in model order
+    rest_lp  = log_priors_phones[:-1]   # phones 0..C-2
+
+    log_priors = np.concatenate([blank_lp, sil_lp, rest_lp]).astype(np.float32)
+    return log_priors[None, :]   # shape (1, C+1)
+
+
 @torch.no_grad()
 def decode(
     model,
@@ -135,9 +176,10 @@ def decode(
     dump_examples=0,
     nbest=1,
     save_nbest=None,
-    acoustic_scale=1.5,
+    acoustic_scale=0.8,
     beam=17.0,
-    blank_penalty=0.0,
+    blank_penalty=None,
+    log_priors=None,
 ):
     model.eval()
 
@@ -162,8 +204,10 @@ def decode(
             beam=beam,
         )
 
+    # speechBCI's actual baseline uses log(2). Older code defaulted to 0.0
+    # which leaves a strong blank-vs-text imbalance during WFST decoding.
     if blank_penalty is None:
-        blank_penalty = 0.0
+        blank_penalty = float(np.log(2.0))
 
     blank = model.num_phonemes
 
@@ -224,14 +268,20 @@ def decode(
             logits_kaldi = _rearrange_for_kaldi(acoustic_logits)
             logits_kaldi = logits_kaldi.cpu().numpy().astype(np.float32)
 
-            log_priors = np.zeros([1, logits_kaldi.shape[-1]], dtype=np.float32)
+            if log_priors is None:
+                log_priors_arr = np.zeros([1, logits_kaldi.shape[-1]],
+                                          dtype=np.float32)
+            else:
+                log_priors_arr = np.asarray(log_priors, dtype=np.float32)
+                if log_priors_arr.ndim == 1:
+                    log_priors_arr = log_priors_arr[None, :]
 
             for i, L in enumerate(enc_lens_list):
                 decoder_lm.Reset()
                 lm_module.DecodeNumpy(
                     decoder_lm,
                     logits_kaldi[i, :L],
-                    log_priors,
+                    log_priors_arr,
                     float(blank_penalty),
                 )
                 decoder_lm.FinishDecoding()
@@ -299,12 +349,17 @@ def main():
                         help="save nbest lists to this .pkl path for GPT-2 rescoring")
     parser.add_argument("--dump_examples", default=0, type=int,
                         help="print first N decoded examples for debugging")
-    parser.add_argument("--acoustic_scale", default=1.5, type=float,
-                    help="WFST acoustic scale; speechBCI default is 1.5")
+    parser.add_argument("--acoustic_scale", default=0.8, type=float,
+                    help="WFST acoustic scale; speechBCI baseline is 0.8")
     parser.add_argument("--beam", default=17.0, type=float,
                     help="WFST beam; speechBCI default is 17")
-    parser.add_argument("--blank_penalty", default=0.0, type=float,
-                    help="blank penalty for lm_decoder; speechBCI default is 0.0")
+    parser.add_argument("--blank_penalty", default=float(np.log(2.0)),
+                    type=float,
+                    help="blank penalty for lm_decoder; "
+                         "speechBCI baseline is log(2) ~= 0.693")
+    parser.add_argument("--no_log_priors", action="store_true",
+                        help="disable training-prior subtraction; pass zeros "
+                             "to lm_decoder (legacy behavior).")
     parser.add_argument("--split", default="test",
                         choices=["train", "dev", "test"],
                         help="which split to evaluate on (default: test)")
@@ -344,6 +399,13 @@ def main():
     print(f"[decode] split={args.split}  size={len(loader.dataset)}  "
           f"checkpoint={args.checkpoint}")
 
+    log_priors = None
+    if args.lm is not None and not args.no_log_priors:
+        log_priors = compute_log_priors(cfg.data_path, cfg.num_phonemes,
+                                        dev_stride=dev_stride)
+        print(f"[decode] log_priors computed from train split, "
+              f"shape={log_priors.shape}")
+
     per, wer = decode(
         model,
         loader,
@@ -357,6 +419,7 @@ def main():
         acoustic_scale=args.acoustic_scale,
         beam=args.beam,
         blank_penalty=args.blank_penalty,
+        log_priors=log_priors,
     )
     print(f"PER: {per * 100:.2f}%")
     if args.lm is not None:
@@ -368,7 +431,8 @@ def main():
         out = {"split": args.split, "checkpoint": args.checkpoint,
                "variant": args.variant, "per": per, "wer": wer,
                "acoustic_scale": args.acoustic_scale,
-               "blank_penalty": args.blank_penalty, "beam": args.beam}
+               "blank_penalty": args.blank_penalty, "beam": args.beam,
+               "log_priors": (not args.no_log_priors) and args.lm is not None}
         _Path(args.save_summary).parent.mkdir(parents=True, exist_ok=True)
         _Path(args.save_summary).write_text(_json.dumps(out, indent=2))
         print(f"Wrote summary to {args.save_summary}")
