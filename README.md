@@ -128,32 +128,14 @@ CUDA_VISIBLE_DEVICES=<gpu_id>
 
 ## Evaluation
 
-### PER: greedy CTC
+### Step 1 — PER (greedy CTC)
 
-PER is computed by greedy CTC decoding on the requested split.
-
-For Variant A, decoding uses the monophone head directly.  
-For Variants B–E, diphone outputs are marginalized to phoneme probabilities before CTC collapse.
-
-```bash
-python src/decode.py \
-  --checkpoint experiments/<run>/best_dev.pt \
-  --variant <A|B|C|D|E> \
-  --split test \
-  --save_summary experiments/<run>/test_summary.json \
-  --config configs/default.yaml
-```
-
-`--split` accepts `train` / `dev` / `test`. `--save_summary` writes a JSON
-with `{per, wer, split, ...}` so the notebook can read final test numbers
-without re-running decode.
-
-To populate the Results table, decode every run directory in one pass:
+For Variant A the monophone head is decoded directly; for B–E, raw diphone
+logits are marginalized to phoneme probabilities (log-sum-exp) before
+CTC collapse. Decode every run on the test split:
 
 ```bash
-# Decode all best_dev.pt checkpoints on the test split
 for run in experiments/variant_*/; do
-  # run name encodes variant: variant_E_alpha0.6_beta0.1_lam0.005_seed42
   v=$(basename "$run" | cut -d_ -f2)
   python src/decode.py \
     --checkpoint "$run/best_dev.pt" \
@@ -164,72 +146,35 @@ for run in experiments/variant_*/; do
 done
 ```
 
----
+`--save_summary` writes `{per, wer, split, ...}` so the notebook can pull
+final numbers without re-running decode.
 
-### WER: 3-gram WFST decoding
+### Step 2 — WER (3-gram sweep, all variants)
 
-Run this in the `lm_decode` environment.
+WFST decoding uses the official speechBCI decoder (run in `lm_decode`).
+Defaults: `acoustic_scale=0.8`, `beam=17`, `blank_penalty=log(2)≈0.693`,
+`log_priors=zeros` (matching speechBCI / cffan; pass `--log_priors` to
+opt into training-prior subtraction).
 
-WER decoding uses the official `speechBCI` WFST decoder. Defaults are aligned
-with speechBCI's actual baseline (`rnn_step3_baselineRNNInference.ipynb`):
-
-```text
-acoustic_scale = 0.8
-beam           = 17
-blank_penalty  = log(2) ~= 0.693
-log_priors     = zeros (matches speechBCI baseline + cffan eval_competition)
-```
-
-Earlier versions of this repo passed `acoustic_scale=1.5` and
-`blank_penalty=0.0` — those values are not what speechBCI's baseline
-notebook actually uses and inflate WER. The defaults above are now correct.
-
-`log_priors` is left at zeros to match both reference implementations
-(`speechBCI/.../lmDecoderUtils.py:185-186` and
-`neural_seq_decoder/scripts/eval_competition.py:110-114` both pass `None`
-which becomes `np.zeros`). `decode.py` can also estimate per-class
-log-priors from the training-set phoneme distribution and subtract them at
-decode time; this is opt-in via `--log_priors` and should be treated as
-experimental, since `TLG.fst` is built assuming zero priors.
-
-Single-run WER decode:
-
-```bash
-conda activate lm_decode
-cd ~/brain2text-skipdiphone
-
-python src/decode.py \
-  --checkpoint experiments/<run>/best_dev.pt \
-  --variant <A|B|C|D|E> \
-  --config configs/default.yaml \
-  --lm 3gram \
-  --lm_dir data/languageModel
-```
-
-Implementation note: WER decoding uses raw acoustic logits. For diphone-based variants, raw diphone logits are marginalized to phoneme-level logits using log-sum-exp before Kaldi/WFST decoding.
-
-### Recommended workflow: 3-gram sweep all → 5-gram sweep best variant
-
-`acoustic_scale` and `blank_penalty` are LM-specific. The optimal values
-shift between 3-gram and 5-gram (compare speechBCI 3-gram defaults
-`ac=0.8, bp=log(2)` vs cffan 5-gram defaults `ac=0.5, bp=log(7)`). So the
-recommended pipeline is:
-
-**Step 1 — 3-gram sweep on every variant** (fast; ranks the ablation table
-and fills the per-variant WER column):
+`acoustic_scale` and `blank_penalty` are LM-specific, so we sweep them
+rather than rely on the defaults. The 3-gram TLG.fst is small enough to
+sweep on every variant:
 
 ```bash
 conda activate lm_decode
 nohup bash scripts/wer_sweep_all.sh > experiments/wer_sweep_all.log 2>&1 &
 ```
 
-This iterates all 10 seed42 runs sequentially, writes per-run CSVs to
-`experiments/<run>/wer_sweep_3gram.csv`, and prints a final summary of
-the best (acoustic_scale, blank_penalty, WER) cell per run.
+Iterates all 10 seed42 runs sequentially, writes per-run CSVs to
+`experiments/<run>/wer_sweep_3gram.csv`, and prints a summary of the
+best `(acoustic_scale, blank_penalty, WER)` cell per run.
 
-**Step 2 — 5-gram sweep on the best variant only** (re-tune around cffan's
-5-gram defaults; the 5-gram TLG.fst is ~42GB so we don't sweep it on every
-variant):
+### Step 3 — WER (5-gram sweep, best variant only)
+
+Optimal `(acoustic_scale, blank_penalty)` shifts with the LM (compare
+speechBCI's 3-gram `ac=0.8, bp=log(2)` vs cffan's 5-gram `ac=0.5, bp=log(7)`).
+The 5-gram TLG.fst is ~42 GB, so we only sweep it on the best variant
+identified in Step 2:
 
 ```bash
 nohup python scripts/wer_sweep.py \
@@ -243,73 +188,18 @@ nohup python scripts/wer_sweep.py \
     > experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.log 2>&1 &
 ```
 
-The acoustic_scale range extends below cffan's 5-gram default (0.5) because
-the 5-gram LM is more informative than 3-gram, so the optimum can sit even
-lower (more weight on the LM, less on the acoustic logits).
-`wer_sweep.py` builds the WFST decoder once per `acoustic_scale` and reuses
-it across all `blank_penalty` values, so the 5-gram (~42GB) FST is loaded
-5 times instead of 20 on this 5×4 grid.
+The ac range extends below cffan's 0.5 because the 5-gram LM is more
+informative than 3-gram. `wer_sweep.py` builds the decoder once per
+`acoustic_scale` and reuses it across all `blank_penalty` values, so the
+~42 GB FST is loaded 5 times instead of 20 on this 5×4 grid.
 
-### Manual single-cell sweep
+### Step 4 (optional) — GPT-2 n-best rescoring
 
-If you just want to explore one combination instead of the full pipeline:
-
-```bash
-python scripts/wer_sweep.py \
-  --checkpoint experiments/<run>/best_dev.pt \
-  --variant <A|B|C|D|E> \
-  --lm 3gram --lm_dir data/languageModel \
-  --acoustic_scales 0.3 0.5 0.8 1.0 1.2 \
-  --blank_penalties 0.0 0.69 1.0 2.0 \
-  --out experiments/<run>/wer_sweep.csv
-```
-
-Both ranges are centered on speechBCI's 3-gram baseline (`acoustic_scale=0.8`,
-`blank_penalty=log(2)≈0.69`). `log_priors` defaults to zeros to match
-speechBCI; pass `--log_priors` to opt into training-set prior subtraction.
-
----
-
-### Optional: GPT-2 combined rescoring
-
-First generate 100-best hypotheses with the 3-gram LM:
-
-```bash
-conda activate lm_decode
-cd ~/brain2text-skipdiphone
-
-python src/decode.py \
-  --checkpoint experiments/<run>/best.pt \
-  --variant <A|B|C|D|E> \
-  --config configs/default.yaml \
-  --lm 3gram \
-  --lm_dir data/languageModel \
-  --nbest 100 \
-  --save_nbest experiments/<run>/nbest.pkl
-```
-
-Then rescore in the `b2t` environment:
-
-```bash
-conda activate b2t
-cd ~/brain2text-skipdiphone
-
-python src/rescore.py \
-  --nbest experiments/<run>/nbest.pkl \
-  --model_name gpt2 \
-  --alpha 0.5 \
-  --acoustic_scale 0.8
-```
-
-The rescoring score follows the speechBCI/DCoND-style combination:
-
-```text
-total_score = alpha * GPT_score
-            + (1 - alpha) * old_LM_score
-            + acoustic_scale * acoustic_score
-```
-
-GPT-2 rescoring is optional and is not claimed as a project contribution. The project contribution is the acoustic-model objective.
+Not claimed as a project contribution, but supported. Generate 100-best
+with `--nbest 100 --save_nbest <path>`, then run `src/rescore.py
+--nbest <path> --model_name gpt2 --alpha 0.5 --acoustic_scale <Step-3 ac>`.
+The combination follows speechBCI/DCoND:
+`total = α·GPT + (1−α)·LM + acoustic_scale·acoustic`.
 
 ---
 
