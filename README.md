@@ -111,6 +111,11 @@ data/speech_5gram/lang_test/
 └── words.txt
 ```
 
+> ⚠️ **RAM requirement.** The unpruned 5-gram graph (`G_no_prune.fst`) is
+> typically 5–10 GB and the WFST decoder must hold it in memory. Without
+> ≥32 GB RAM the decoder will OOM or thrash. Skip this section if your
+> hardware is limited; the 3-gram path is sufficient for the main results.
+
 If `G_no_prune.fst` is too large for available RAM, it can be temporarily renamed so that decoding uses the pruned 5-gram graph only:
 
 ```bash
@@ -285,6 +290,22 @@ python src/decode.py \
 with `{per, wer, split, ...}` so the notebook can read final test numbers
 without re-running decode.
 
+To populate the Results table, decode every run directory in one pass:
+
+```bash
+# Decode all best_dev.pt checkpoints on the test split
+for run in experiments/variant_*/; do
+  # run name encodes variant: variant_E_alpha0.6_beta0.1_lam0.005_seed42
+  v=$(basename "$run" | cut -d_ -f2)
+  python src/decode.py \
+    --checkpoint "$run/best_dev.pt" \
+    --variant "$v" \
+    --split test \
+    --save_summary "$run/test_summary.json" \
+    --config configs/default.yaml
+done
+```
+
 ---
 
 ### WER: 3-gram WFST decoding
@@ -408,10 +429,10 @@ GPT-2 rescoring is optional and is not claimed as a project contribution. The pr
 
 > ⚠️ **Stale.** The numbers below come from the legacy single-seed protocol
 > where `best.pt` was selected on the test split (data leak), under
-> uncalibrated WFST settings (`acoustic_scale=1.5`, `blank_penalty=0`,
-> zero log-priors). They will be replaced by mean ± std over seeds
-> `{42, 1, 2}` decoded with the current calibrated WFST defaults
-> (`acoustic_scale=0.8`, `blank_penalty=log(2)`, training-set log-priors)
+> uncalibrated WFST settings (`acoustic_scale=1.5`, `blank_penalty=0`).
+> They will be replaced by mean ± std over seeds `{42, 1, 2}` decoded with
+> the current calibrated WFST defaults (`acoustic_scale=0.8`,
+> `blank_penalty=log(2)`, `log_priors=zeros` to match speechBCI/cffan)
 > once retraining completes.
 
 Current acoustic decoding results on the test split:
@@ -433,21 +454,24 @@ Earlier decoding experiments showed that WER improved only modestly under
 under **uncalibrated WFST settings** (`acoustic_scale=1.5`,
 `blank_penalty=0`, zero log-priors), which inflates WER on this acoustic
 model; whether the conclusion still holds under the calibrated defaults
-(`acoustic_scale=0.8`, `blank_penalty=log(2)`, training-set log-priors)
-is being re-verified.
+(`acoustic_scale=0.8`, `blank_penalty=log(2)`, `log_priors=zeros` to match
+speechBCI/cffan) is being re-verified.
 
 ---
 
 ## Notes on Fair Comparison
 
-This project reports two types of metrics:
+The project contribution is the **acoustic-model objective** (skip-diphone
+auxiliary supervision + temporal smoothness regularization), measured by
+**PER**. WER is reported as a downstream check using the standard
+speechBCI/DCoND-style WFST + optional n-best rescoring pipeline.
 
-1. **PER**, which evaluates the acoustic neural-to-phoneme model directly.
-2. **WER**, which evaluates the full decoding pipeline with a language model.
-
-The main project contribution is the acoustic model objective: skip-diphone auxiliary supervision and temporal smoothness regularization. For word-level evaluation, this project follows the standard speechBCI/DCoND-style WFST and optional n-best rescoring pipeline.
-
-For fair A/B/C/D/E comparison, all variants should use the same WER decoding settings.
+For fair A/B/C/D/E comparison, all variants must be decoded with the
+**same** `(acoustic_scale, blank_penalty, log_priors, lm)` settings. The
+recommended workflow is to run `scripts/wer_sweep.py` once on the best
+variant to find the optimal `(acoustic_scale, blank_penalty)`, then decode
+every variant with that fixed pair. See `Methodology` for the
+checkpoint-selection protocol.
 
 ---
 
