@@ -160,19 +160,17 @@ effect.
 
 > **Migration note.** Checkpoints saved before the dev-split methodology
 > change are `best.pt`, selected on test PER, and **should not be used
-> for final reporting** — they constitute a test-set leak. Re-train under
-> the current protocol to produce `best_dev.pt`. The Results table below
-> is from the legacy protocol and will be replaced after retraining completes.
+> for final reporting** — they constitute a test-set leak. The Results
+> table below is decoded from `best_dev.pt` checkpoints under the current
+> protocol.
 
-> **Effect on absolute PER.** Under the dev-split protocol, absolute test
-> PER is typically ~1pp higher than under the legacy "lowest test PER
-> across epochs" selection, simply because the legacy protocol implicitly
-> cherry-picks epochs against the test split. Concurrent works on this
-> dataset that report numbers under the legacy convention are therefore
-> not directly comparable in absolute terms — but our **between-variant
-> gain (e.g. A → E)** is *larger* under the dev-split protocol than under
-> the legacy one, indicating the improvement is not an evaluation
-> artifact.
+> **Effect on absolute PER.** Under the dev-split protocol, the
+> A→E gap shrinks from 1.95pp (legacy cherry-picked) to 0.73pp (honest).
+> Most of the shrinkage comes from removing the test-epoch cherry-pick
+> on E (~0.8pp inflation). A also improves by ~0.5pp under the new
+> protocol, because A@150 (sanity check) replaces the under-trained A@80.
+> Concurrent works on this dataset that report numbers under the legacy
+> convention are therefore not directly comparable in absolute terms.
 
 ---
 
@@ -415,27 +413,30 @@ GPT-2 rescoring is optional and is not claimed as a project contribution. The pr
 
 ## Results
 
-> ⚠️ **Stale.** The numbers below come from the legacy single-seed protocol
-> where `best.pt` was selected on the test split (data leak), under
-> uncalibrated WFST settings (`acoustic_scale=1.5`, `blank_penalty=0`).
-> They will be replaced by mean ± std over seeds `{42, 1, 2}` decoded with
-> the current calibrated WFST defaults (`acoustic_scale=0.8`,
-> `blank_penalty=log(2)`, `log_priors=zeros` to match speechBCI/cffan)
-> once retraining completes.
+Acoustic decoding results on the test split, under the dev-split protocol
+(`best_dev.pt` selected on the held-out dev set, no test leakage):
 
-Current acoustic decoding results on the test split:
-
-| Rank | Variant | Core setting | Best PER (greedy) | WER | Notes |
+| Rank | Variant | Core setting | Test PER (greedy) | WER | Notes |
 |------|---------|--------------|------------------:|----:|-------|
-| 1 | E | Skip-diphone + smoothness, λ=0.005 | 18.99% | TBD | Best acoustic model |
-| 2 | D | Skip-diphone | 19.50% | TBD | Skip-diphone auxiliary supervision |
-| 3 | C | Diphone + smoothness, λ=0.01 | 19.58% | TBD | High smoothness weight |
-| 4 | C | Diphone + smoothness, λ=0.005 | 19.63% | TBD |  |
-| 5 | B | Diphone baseline | 19.64% | TBD |  |
-| 6 | C | Diphone + smoothness, λ=0.001 | 19.67% | TBD |  |
-| 7 | A | Monophone CTC baseline | 20.94% | TBD | Acoustic baseline |
+| 1 | E | Skip-diphone + smoothness, λ=0.005 | 19.75% | TBD | Best acoustic model |
+| 2 | D | Skip-diphone, β=0.2 | 20.12% | TBD | Best β for D |
+| 3 | D | Skip-diphone, β=0.1 (default) | 20.20% | TBD |  |
+| 4 | C | Diphone + smoothness, λ=0.01 | 20.36% | TBD |  |
+| 4 | C | Diphone + smoothness, λ=0.001 | 20.36% | TBD |  |
+| 4 | D | Skip-diphone, β=0.05 | 20.36% | TBD |  |
+| 7 | B | Diphone baseline | 20.41% | TBD |  |
+| 8 | C | Diphone + smoothness, λ=0.005 | 20.45% | TBD |  |
+| 9 | D | Skip-diphone, β=0.3 | 20.47% | TBD |  |
+| 10 | A | Monophone CTC baseline (150 ep) | 20.48% | TBD | Acoustic baseline |
 
-Variant E improves PER from 20.94% to 18.99%, corresponding to a 1.95 absolute-point reduction and a 9.3% relative reduction over the monophone baseline.
+Variant E improves test PER from 20.48% (A) to 19.75% (E) — a **0.73 absolute-point reduction** (3.6% relative). The gap is smaller than under the legacy "lowest test PER across epochs" protocol (1.95pp) because that protocol cherry-picked the best test epoch per run, inflating the apparent contribution.
+
+**Sanity check (A@150):** Even when A is trained for 150 epochs (matching E's training budget), it reaches only 20.48% PER, still 0.73pp behind E. This isolates the contribution to the **objective** rather than to additional training time.
+
+**β / λ observations:**
+- D's β has a clear shallow optimum at β=0.2 (20.12%); β=0.05 and β=0.3 both lose ~0.3pp.
+- C's λ ∈ {1e-3, 5e-3, 1e-2} produces nearly identical PER (20.36 / 20.45 / 20.36); smoothness alone is not strongly tunable on this acoustic head.
+- E (smoothness + skip-diphone) outperforms either component alone, suggesting they are complementary.
 
 Earlier decoding experiments showed that WER improved only modestly under
 3-gram/5-gram WFST decoding and GPT-2 rescoring. Those experiments ran
