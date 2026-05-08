@@ -20,157 +20,29 @@ See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation pl
 
 ---
 
-## Requirements
+## Setup
 
-- Python 3.11
-- CUDA 11.8+
-- ≥16 GB VRAM recommended for training
-- Large RAM is recommended for 5-gram WFST decoding, especially if using the unpruned rescoring graph
-
----
-
-## Installation
-
-```bash
-conda create -n b2t python=3.11 -y
-conda activate b2t
-
-pip install torch --index-url https://download.pytorch.org/whl/cu118
-pip install -r requirements.txt
-```
-
-### LM decode environment for WER
-
-WER decoding uses the official `speechBCI` WFST language-model decoder.
-
-```bash
-conda create -n lm_decode python=3.9 -y
-conda activate lm_decode
-
-pip install torch==1.13.1
-conda install -c conda-forge cmake gcc gxx make -y
-
-git clone https://github.com/fwillett/speechBCI.git
-cd ~/speechBCI/LanguageModelDecoder/runtime/server/x86
-mkdir -p build
-cd build
-cmake ..
-make -j8
-cd ..
-python setup.py install
-
-pip install editdistance omegaconf "numpy<2"
-python -c "import lm_decoder; print('OK')"
-```
-
-For GPT-2 rescoring, use the `b2t` environment or another PyTorch 2.x environment:
-
-```bash
-conda activate b2t
-pip install transformers editdistance
-```
-
----
-
-## Data
-
-1. Download `competitionData.tar.gz` from: https://doi.org/10.5061/dryad.x69p8czpq
-2. Convert it with cffan's `formatCompetitionData.ipynb`.
-3. Place the converted file at:
-
-```bash
-data/competitionData.pkl
-```
-
-For 3-gram WER decoding, download `languageModel.tar.gz` and extract it to:
-
-```bash
-data/languageModel/
-```
-
-Expected 3-gram structure:
-
-```text
-data/
-├── competitionData.pkl
-└── languageModel/
-    ├── TLG.fst
-    ├── G.fst
-    ├── G_no_prune.fst
-    ├── words.txt
-    └── ...
-```
-
-For optional 5-gram WER decoding, download and extract the 5-gram language model. In my setup, the 5-gram files are located at:
-
-```text
-data/speech_5gram/lang_test/
-├── TLG.fst
-├── G.fst
-├── G_no_prune.fst
-└── words.txt
-```
-
-> ⚠️ **RAM requirement.** The unpruned 5-gram graph (`G_no_prune.fst`) is
-> typically 5–10 GB and the WFST decoder must hold it in memory. Without
-> ≥32 GB RAM the decoder will OOM or thrash. Skip this section if your
-> hardware is limited; the 3-gram path is sufficient for the main results.
-
-If `G_no_prune.fst` is too large for available RAM, it can be temporarily renamed so that decoding uses the pruned 5-gram graph only:
-
-```bash
-mv data/speech_5gram/lang_test/G_no_prune.fst \
-   data/speech_5gram/lang_test/G_no_prune.fst.bak
-```
-
-Restore it with:
-
-```bash
-mv data/speech_5gram/lang_test/G_no_prune.fst.bak \
-   data/speech_5gram/lang_test/G_no_prune.fst
-```
+- **Environments**: see [docs/INSTALL.md](docs/INSTALL.md). Two conda envs are
+  used: `b2t` for training/PER and `lm_decode` for WFST WER decoding.
+- **Data**: see [data/README.md](data/README.md) for downloading
+  `competitionData.tar.gz`, converting to `competitionData.pkl`, and
+  extracting `languageModel.tar.gz` (3-gram) or `languageModel_5gram.tar.gz`
+  (optional, ≥32 GB RAM if `G_no_prune.fst` is kept).
 
 ---
 
 ## Methodology
 
-To avoid using the same split for both checkpoint selection and final
-reporting, the pkl `train` bucket is partitioned into:
+The pkl `train` bucket is partitioned into **train** (~90%) and **dev**
+(~10%, every `dev_stride`-th trial per day, deterministic). `best_dev.pt`
+is selected on dev PER; pkl `test` is held out and only decoded once on
+the final checkpoint. Set `dev_stride: 0` to fall back to the legacy
+protocol of using `test` for both validation and reporting.
 
-- **train** (~90%) — used for gradient updates.
-- **dev** (~10%) — every `dev_stride`-th trial within each recording day,
-  deterministic across runs. Used to pick `best_dev.pt`.
-
-The pkl `test` split is evaluated only every `eval_test_every` epochs as a
-tracking signal during training. **Final test PER is reported by running
-`decode.py` on `best_dev.pt`**, which is what this README's results table
-should use. Each training run also writes `final.pt` at the last epoch and
-a `summary.json` with `{best_dev_epoch, best_dev_per, test_per_at_best_dev,
-final_dev_per, final_test_per}`.
-
-For seed-noise control, runs are repeated with multiple seeds. Run
-directories include the seed (`..._seed42`, `..._seed1`, ...) so the
-notebook can aggregate as mean ± std. Set `cudnn_deterministic: true` (or
-pass `--deterministic`) to force cuDNN GRU into deterministic mode (~20%
-slower) for tighter seed comparisons.
-
-Setting `dev_stride: 0` falls back to the legacy protocol of using `test`
-for both validation and reporting; the trainer warns when this is in
-effect.
-
-> **Migration note.** Checkpoints saved before the dev-split methodology
-> change are `best.pt`, selected on test PER, and **should not be used
-> for final reporting** — they constitute a test-set leak. The Results
-> table below is decoded from `best_dev.pt` checkpoints under the current
-> protocol.
-
-> **Effect on absolute PER.** Under the dev-split protocol, the
-> A→E gap shrinks from 1.95pp (legacy cherry-picked) to 0.73pp (honest).
-> Most of the shrinkage comes from removing the test-epoch cherry-pick
-> on E (~0.8pp inflation). A also improves by ~0.5pp under the new
-> protocol, because A@150 (sanity check) replaces the under-trained A@80.
-> Concurrent works on this dataset that report numbers under the legacy
-> convention are therefore not directly comparable in absolute terms.
+> **Note on absolute PER.** Numbers from the legacy "lowest test PER
+> across epochs" protocol cherry-pick the best test epoch and are not
+> directly comparable to dev-split numbers. Under the dev-split protocol
+> here, the A→E gap is 0.73pp (honest) vs 1.95pp under legacy.
 
 ---
 
