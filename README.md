@@ -167,6 +167,16 @@ nohup python src/train.py \
   > experiments/variant_E_lam5e-3.log 2>&1 &
 ```
 
+`train.py` also accepts `--alpha` (std-diphone CTC weight) and `--beta`
+(skip-diphone CTC weight) overrides; these are reflected in the run name
+so sweep runs land in distinct directories under `experiments/`.
+
+### β ablation (Variant D)
+
+```bash
+bash scripts/beta_sweep.sh   # trains D with beta in {0.05, 0.1, 0.2, 0.3}
+```
+
 Monitor training:
 
 ```bash
@@ -224,6 +234,26 @@ python src/decode.py \
 ```
 
 Implementation note: WER decoding uses raw acoustic logits. For diphone-based variants, raw diphone logits are marginalized to phoneme-level logits using log-sum-exp before Kaldi/WFST decoding.
+
+### WER hyperparameter sweep
+
+PER gains from the acoustic objective only show up in WER if `acoustic_scale`
+(and to a lesser extent `blank_penalty`) is recalibrated for the new model.
+`scripts/wer_sweep.py` loads a checkpoint once and grid-scans the WFST
+hyperparameters, writing a CSV that the notebook reads back as a heatmap.
+
+```bash
+conda activate lm_decode
+cd ~/brain2text-skipdiphone
+
+python scripts/wer_sweep.py \
+  --checkpoint experiments/<run>/best.pt \
+  --variant <A|B|C|D|E> \
+  --lm 3gram --lm_dir data/languageModel \
+  --acoustic_scales 0.5 0.8 1.0 1.2 1.5 \
+  --blank_penalties 0.0 1.0 2.0 \
+  --out experiments/<run>/wer_sweep.csv
+```
 
 ---
 
