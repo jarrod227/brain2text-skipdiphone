@@ -9,9 +9,15 @@ once, then iterates over a grid and reports WER for each cell.
 
 Run inside the `lm_decode` conda environment.
 
-Default ranges are centered on speechBCI's actual baseline settings
-(acoustic_scale=0.8, blank_penalty=log(2)) instead of brain2text's older
-mis-calibrated defaults.
+Default grid (5x5):
+    acoustic_scales = 0.3, 0.5, 0.8, 1.0, 1.2
+    blank_penalties = 1.0, 2.0, 3.0, 4.0, 5.0
+The bp range starts at 1.0 because earlier sweeps showed bp<1.0 is
+strictly dominated by bp>=1.0 on this acoustic model + LM combination
+(mono A and diphone B both peak at the upper end of [0, 2]). Values
+above 2.0 are needed because B's bp curve was still monotonically
+improving at bp=2.0 (cffan's log(7)~=1.95 baseline is for 5-gram and
+under-penalizes blank with our 3-gram setup).
 
 Usage:
     python scripts/wer_sweep.py \
@@ -19,8 +25,6 @@ Usage:
         --variant E \
         --lm 3gram \
         --lm_dir data/languageModel \
-        --acoustic_scales 0.3 0.5 0.8 1.0 1.2 \
-        --blank_penalties 0.0 0.69 1.0 2.0 \
         --beam 17.0 \
         --out experiments/variant_E_alpha0.6_beta0.1_lam0.005/wer_sweep.csv
 """
@@ -66,7 +70,7 @@ def main():
         "--blank_penalties",
         nargs="+",
         type=float,
-        default=[0.0, 0.69, 1.0, 2.0],
+        default=[1.0, 2.0, 3.0, 4.0, 5.0],
     )
     parser.add_argument("--split", default="test", choices=["train", "dev", "test"],
                         help="which split to sweep on (default: test)")
@@ -120,7 +124,7 @@ def main():
     for ac in args.acoustic_scales:
         # Build the WFST decoder once per acoustic_scale and reuse it
         # across all blank_penalty values. The 5-gram TLG.fst is ~42GB,
-        # so this avoids 15 redundant 42GB loads on a 5x4 grid.
+        # so this avoids 20 redundant 42GB loads on the default 5x5 grid.
         print(f"[wer_sweep] loading decoder for acoustic_scale={ac:.2f} ...",
               flush=True)
         decoder_lm = _build_lm_decoder(
