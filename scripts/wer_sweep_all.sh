@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
-# Run 3-gram wer_sweep sequentially over all seed42 experiments to rank
-# variants and produce per-run WER numbers. After identifying the best
-# variant, run a separate 5-gram sweep on that variant only (the 5-gram
-# TLG.fst is ~42GB; sweeping all variants on 5-gram is wasteful and the
-# optimal acoustic_scale differs from 3-gram anyway).
+# Run 3-gram wer_sweep sequentially over the diphone seed42 experiments
+# (B/C/D/E) to rank variants and produce per-run WER numbers. After
+# identifying the best variant, run a separate 5-gram sweep on that
+# variant only (the 5-gram TLG.fst is ~42GB; sweeping all variants on
+# 5-gram is wasteful and the optimal acoustic_scale differs from 3-gram
+# anyway).
+#
+# Variant A is intentionally excluded: A doesn't go through the diphone
+# marginalization code path, its bp curve plateaus near bp=2.0, and its
+# WER (19.00% at ac=0.5, bp=2.0) was already established with the older
+# narrower bp grid. Re-running A with the wider grid would only refine
+# its number by <=0.5pp and isn't worth ~1 hour of FST loading.
 #
 # Usage (from repo root, in lm_decode env):
 #   nohup bash scripts/wer_sweep_all.sh > experiments/wer_sweep_all.log 2>&1 &
@@ -14,7 +21,6 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 RUNS=(
-    experiments/variant_A_alpha0.6_beta0.1_lam0.001_seed42
     experiments/variant_B_alpha0.6_beta0.1_lam0.001_seed42
     experiments/variant_C_alpha0.6_beta0.1_lam0.001_seed42
     experiments/variant_C_alpha0.6_beta0.1_lam0.005_seed42
