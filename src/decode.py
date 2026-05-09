@@ -84,26 +84,33 @@ def _rearrange_for_kaldi(logits):
 
 def _marginalize_diphone_logits(diphone_logits, num_phonemes):
     """
-    Convert raw diphone logits to phoneme-level logits using log-sum-exp.
+    Convert raw diphone logits to phoneme-level log-probs using log-sum-exp.
 
     Diphone class index:
         diphone_id = previous_phoneme * C + current_phoneme
+
+    log_softmax is applied BEFORE marginalization so that the resulting
+    (phone, blank) distribution is properly normalized. Marginalizing raw
+    logits would boost phone scores by ~log(C) (one logsumexp over C prev
+    phonemes) without applying the same boost to blank, breaking the
+    blank-vs-phone scale that the WFST decoder relies on.
 
     Args:
         diphone_logits: (B, T, C*C + 1), where the last class is CTC blank
         num_phonemes: C
 
     Returns:
-        phoneme_logits: (B, T, C + 1), where the last class is CTC blank
+        phoneme_log_probs: (B, T, C + 1), where the last class is CTC blank
     """
     B, T, _ = diphone_logits.shape
     C = num_phonemes
 
-    dip = diphone_logits[..., :-1].view(B, T, C, C)  # (B, T, previous, current)
-    phone_logits = torch.logsumexp(dip, dim=2)       # marginalize previous phoneme
-    blank_logits = diphone_logits[..., -1:]          # keep CTC blank logit
+    log_probs = torch.log_softmax(diphone_logits, dim=-1)
+    dip = log_probs[..., :-1].view(B, T, C, C)       # (B, T, previous, current)
+    phone_log_probs = torch.logsumexp(dip, dim=2)    # marginalize previous phoneme
+    blank_log_prob = log_probs[..., -1:]             # keep CTC blank log-prob
 
-    return torch.cat([phone_logits, blank_logits], dim=-1)
+    return torch.cat([phone_log_probs, blank_log_prob], dim=-1)
 
 
 def _build_lm_decoder(lm_dir, nbest=1, acoustic_scale=0.8, beam=17.0,
