@@ -149,25 +149,31 @@ done
 `--save_summary` writes `{per, wer, split, ...}` so the notebook can pull
 final numbers without re-running decode.
 
-### Step 2 — WER (3-gram sweep, all variants)
+### Step 2 — WER (3-gram sweep, B/C/D/E)
 
 WFST decoding uses the official speechBCI decoder (run in `lm_decode`).
-Defaults: `acoustic_scale=0.8`, `beam=17`, `blank_penalty=log(2)≈0.693`,
-`log_priors=zeros` (matching speechBCI / cffan; pass `--log_priors` to
-opt into training-prior subtraction).
-
-`acoustic_scale` and `blank_penalty` are LM-specific, so we sweep them
-rather than rely on the defaults. The 3-gram TLG.fst is small enough to
-sweep on every variant:
+The 3-gram TLG.fst is small enough to sweep every diphone variant:
 
 ```bash
 conda activate lm_decode
 nohup bash scripts/wer_sweep_all.sh > experiments/wer_sweep_all.log 2>&1 &
 ```
 
-Iterates all 10 seed42 runs sequentially, writes per-run CSVs to
-`experiments/<run>/wer_sweep_3gram.csv`, and prints a summary of the
-best `(acoustic_scale, blank_penalty, WER)` cell per run.
+Iterates the 9 diphone seed42 runs sequentially over the default 5×5
+grid (`ac ∈ {0.3, 0.5, 0.8, 1.0, 1.2}`, `bp ∈ {1.0, 2.0, 3.0, 4.0, 5.0}`),
+writes per-run CSVs to `experiments/<run>/wer_sweep_3gram.csv`, and
+prints a summary of the best `(acoustic_scale, blank_penalty, WER)`
+cell per run. Variant A is excluded from the script — its bp curve
+plateaus near bp=2.0 and its WER (19.00% at ac=0.5, bp=2.0) was already
+established with the older narrower grid; redoing it would add ~1 hour
+of FST loading for ≤0.5pp of refinement.
+
+> **Why this grid?** The diphone variants peak at ac=0.8 (vs A's 0.5),
+> so the 3-gram bp curve is still monotonically improving at bp=2.0
+> (cffan's log(7)≈1.95 is calibrated for 5-gram and under-penalizes
+> blank with our 3-gram). Earlier sweeps with `bp ∈ {0, 0.69, 1, 2}`
+> were strictly dominated above bp=1.0 on every cell, so the wider grid
+> drops 0/0.69 and extends to 5.0.
 
 ### Step 3 — WER (5-gram sweep, best variant only)
 
@@ -182,16 +188,14 @@ nohup python scripts/wer_sweep.py \
     --variant E \
     --lm 5gram \
     --lm_dir data/speech_5gram/lang_test \
-    --acoustic_scales 0.1 0.2 0.3 0.5 0.8 \
-    --blank_penalties 0.0 0.69 1.0 2.0 \
+    --acoustic_scales 0.3 0.5 0.8 1.0 1.2 \
     --out experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.csv \
     > experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.log 2>&1 &
 ```
 
-The ac range extends below cffan's 0.5 because the 5-gram LM is more
-informative than 3-gram. `wer_sweep.py` builds the decoder once per
-`acoustic_scale` and reuses it across all `blank_penalty` values, so the
-~42 GB FST is loaded 5 times instead of 20 on this 5×4 grid.
+`wer_sweep.py` builds the decoder once per `acoustic_scale` and reuses
+it across all `blank_penalty` values, so the ~42 GB FST is loaded 5
+times instead of 25 on this 5×5 grid.
 
 ### Step 4 (optional) — GPT-2 n-best rescoring
 
