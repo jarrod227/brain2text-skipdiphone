@@ -159,43 +159,46 @@ conda activate lm_decode
 nohup bash scripts/wer_sweep_all.sh > experiments/wer_sweep_all.log 2>&1 &
 ```
 
-Iterates the 9 diphone seed42 runs sequentially over the default 5×5
-grid (`ac ∈ {0.3, 0.5, 0.8, 1.0, 1.2}`, `bp ∈ {1.0, 2.0, 3.0, 4.0, 5.0}`),
+Iterates the 9 diphone seed42 runs sequentially over a 5×5 grid
+(`ac ∈ {0.3, 0.5, 0.8, 1.0, 1.2}`, `bp ∈ {1.0, 2.0, 3.0, 4.0, 5.0}`),
 writes per-run CSVs to `experiments/<run>/wer_sweep_3gram.csv`, and
-prints a summary of the best `(acoustic_scale, blank_penalty, WER)`
-cell per run. Variant A is excluded from the script — its bp curve
-plateaus near bp=2.0 and its WER (19.00% at ac=0.5, bp=2.0) was already
-established with the older narrower grid; redoing it would add ~1 hour
-of FST loading for ≤0.5pp of refinement.
+prints a summary of the best `(acoustic_scale, blank_penalty, WER)` cell
+per run. Variant A is excluded — its 3-gram WER (19.00% at ac=0.5,
+bp=2.0, older narrower grid) is an **upper bound** since the bp curve was
+still declining at bp=2.0. Each variant is evaluated at its own optimal
+`(ac, bp)` because diphone outputs (1601-class softmax + marginalization)
+and monophone outputs (direct 41-class softmax) have different calibrations
+and different optimal cells.
 
-> **Why this grid?** The diphone variants peak at ac=0.8 (vs A's 0.5),
-> so the 3-gram bp curve is still monotonically improving at bp=2.0
-> (cffan's log(7)≈1.95 is calibrated for 5-gram and under-penalizes
-> blank with our 3-gram). Earlier sweeps with `bp ∈ {0, 0.69, 1, 2}`
-> were strictly dominated above bp=1.0 on every cell, so the wider grid
-> drops 0/0.69 and extends to 5.0.
+### Step 3 — WER (5-gram sweep, A and E)
 
-### Step 3 — WER (5-gram sweep, best variant only)
-
-Optimal `(acoustic_scale, blank_penalty)` shifts with the LM (compare
-speechBCI's 3-gram `ac=0.8, bp=log(2)` vs cffan's 5-gram `ac=0.5, bp=log(7)`).
-The 5-gram TLG.fst is ~42 GB, so we only sweep it on the best variant
-identified in Step 2:
+The 5-gram TLG.fst is ~42 GB, so we only sweep it on E (best PER) and A
+(WER reference). Diphone variants need a wider bp range to compensate for
+the softer marginalized phone distribution:
 
 ```bash
+# E: ac 0.2–0.9, bp 3–10
 nohup python scripts/wer_sweep.py \
     --checkpoint experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/best_dev.pt \
-    --variant E \
-    --lm 5gram \
-    --lm_dir data/speech_5gram/lang_test \
-    --acoustic_scales 0.3 0.5 0.8 1.0 1.2 \
+    --variant E --lm 5gram --lm_dir data/speech_5gram/lang_test \
+    --acoustic_scales 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 \
+    --blank_penalties 3.0 4.0 5.0 6.0 7.0 8.0 9.0 10.0 \
     --out experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.csv \
     > experiments/variant_E_alpha0.6_beta0.1_lam0.005_seed42/wer_sweep_5gram.log 2>&1 &
+
+# A: ac 0.3–1.1, bp 1–7
+nohup python scripts/wer_sweep.py \
+    --checkpoint experiments/variant_A_alpha0.6_beta0.1_lam0.001_seed42/best_dev.pt \
+    --variant A --lm 5gram --lm_dir data/speech_5gram/lang_test \
+    --acoustic_scales 0.3 0.5 0.7 0.9 1.1 \
+    --blank_penalties 1.0 2.0 3.0 4.0 5.0 6.0 7.0 \
+    --out experiments/variant_A_alpha0.6_beta0.1_lam0.001_seed42/wer_sweep_5gram.csv \
+    > experiments/variant_A_alpha0.6_beta0.1_lam0.001_seed42/wer_sweep_5gram.log 2>&1 &
 ```
 
-`wer_sweep.py` builds the decoder once per `acoustic_scale` and reuses
-it across all `blank_penalty` values, so the ~42 GB FST is loaded 5
-times instead of 25 on this 5×5 grid.
+`wer_sweep.py` builds the decoder once per `acoustic_scale` and reuses it
+across all `blank_penalty` values, so the ~42 GB FST is loaded N times
+instead of N×M.
 
 ### Step 4 (optional) — GPT-2 n-best rescoring
 
@@ -210,52 +213,65 @@ The combination follows speechBCI/DCoND:
 ## Results
 
 Acoustic decoding results on the test split, under the dev-split protocol
-(`best_dev.pt` selected on the held-out dev set, no test leakage):
+(`best_dev.pt` selected on the held-out dev set, no test leakage).
+WER uses WFST decoding with per-variant optimal `(acoustic_scale, blank_penalty)`.
 
-| Rank | Variant | Core setting | Test PER (greedy) | WER | Notes |
-|------|---------|--------------|------------------:|----:|-------|
-| 1 | E | Skip-diphone + smoothness, λ=0.005 | 19.75% | TBD | Best acoustic model |
-| 2 | D | Skip-diphone, β=0.2 | 20.12% | TBD | Best β for D |
-| 3 | D | Skip-diphone, β=0.1 (default) | 20.20% | TBD |  |
-| 4 | C | Diphone + smoothness, λ=0.01 | 20.36% | TBD |  |
-| 4 | C | Diphone + smoothness, λ=0.001 | 20.36% | TBD |  |
-| 4 | D | Skip-diphone, β=0.05 | 20.36% | TBD |  |
-| 7 | B | Diphone baseline | 20.41% | TBD |  |
-| 8 | C | Diphone + smoothness, λ=0.005 | 20.45% | TBD |  |
-| 9 | D | Skip-diphone, β=0.3 | 20.47% | TBD |  |
-| 10 | A | Monophone CTC baseline (150 ep) | 20.48% | TBD | Acoustic baseline |
+### Combined ranking (sorted by PER)
 
-Variant E improves test PER from 20.48% (A) to 19.75% (E) — a **0.73 absolute-point reduction** (3.6% relative). The gap is smaller than under the legacy "lowest test PER across epochs" protocol (1.95pp) because that protocol cherry-picked the best test epoch per run, inflating the apparent contribution.
+| Rank | Variant | Core setting | Test PER | 3-gram WER | 5-gram WER |
+|------|---------|--------------|---------:|-----------:|-----------:|
+| 1 | E | Skip-diphone + smoothness, λ=0.005 | **19.75%** | 19.31% | 18.56% |
+| 2 | D | Skip-diphone, β=0.2 | 20.12% | 20.14% | — |
+| 3 | D | Skip-diphone, β=0.1 (default) | 20.20% | 20.05% | — |
+| 4= | D | Skip-diphone, β=0.05 | 20.36% | 20.12% | — |
+| 4= | C | Diphone + smoothness, λ=0.001 | 20.36% | 19.05% | — |
+| 4= | C | Diphone + smoothness, λ=0.01 | 20.36% | 19.21% | — |
+| 7 | B | Diphone baseline | 20.41% | 19.23% | — |
+| 8 | C | Diphone + smoothness, λ=0.005 | 20.45% | **19.01%** | — |
+| 9 | D | Skip-diphone, β=0.3 | 20.47% | 20.41% | — |
+| 10 | A | Monophone CTC baseline (150 ep) | 20.48% | 19.00%† | **18.07%** |
 
-**Sanity check (A@150):** Even when A is trained for 150 epochs (matching E's training budget), it reaches only 20.48% PER, still 0.73pp behind E. This isolates the contribution to the **objective** rather than to additional training time.
+† A's 3-gram sweep used an older narrower grid (`bp ∈ {0, 0.69, 1, 2}`); the bp curve was still
+declining at bp=2.0, so 19.00% is an **upper bound** on A's 3-gram minimum.
+
+Per-variant optimal cells: A peaks at (ac=0.5, bp=4) on 5-gram and (ac=0.5, bp=2) on 3-gram;
+B/C/D peak at ac=0.8 on 3-gram; E uniquely peaks at ac=0.5 on both LMs — closer to A than to
+the other diphone variants.
+
+### WER observations
+
+**Skip-diphone (D) hurts WER substantially despite helping PER.**
+All four D variants land at 20.05–20.41% 3-gram WER — 0.8–1.2pp worse than B (19.23%) — even
+though D β=0.1/0.2 have *better* PER than B. The skip-diphone auxiliary loss encourages
+longer-range context in the encoder, which helps phone discrimination but disrupts the blank/phone
+temporal calibration the WFST relies on. This is **not** a marginalization artefact: B/C use the
+same marginalization without the WER regression.
+
+**Smoothness (C) actually *helps* 3-gram WER.**
+C λ=0.005 attains the best 3-gram WER overall (19.01%); all three C variants beat B's 19.23%.
+Temporally smooth phone posteriors appear to make the lattice cleaner for the WFST.
+
+**E (= D + C) sits in between.**
+E achieves the best PER (−0.73pp vs A), but its 3-gram WER (19.31%) reflects D's regression
+partially recovered by C's smoothness. On 5-gram, E's 18.56% is the best diphone result but
+0.49pp behind A's 18.07%. The diphone marginalization (`logsumexp` over 40 contexts) yields a
+softer phone distribution than direct monophone CTC, requiring a higher blank penalty to
+recalibrate (E: bp=7 vs A: bp=4 on 5-gram); with the strong 5-gram LM dominating, this
+miscalibration costs more.
 
 **β / λ observations:**
-- D's β has a clear shallow optimum at β=0.2 (20.12%); β=0.05 and β=0.3 both lose ~0.3pp.
-- C's λ ∈ {1e-3, 5e-3, 1e-2} produces nearly identical PER (20.36 / 20.45 / 20.36); smoothness alone is not strongly tunable on this acoustic head.
-- E (smoothness + skip-diphone) outperforms either component alone, suggesting they are complementary.
+- D's PER optimum is β=0.2 (20.12%); its WER optimum is β=0.1 (20.05%). β=0.3 hurts both.
+- C's λ=0.005 wins WER (19.01%) despite having the worst PER among C runs (20.45%).
+- E improves PER over B by 0.66pp but worsens 3-gram WER by 0.08pp.
 
-WER columns will be filled by `scripts/wer_sweep_all.sh` (3-gram, all
-variants) for ranking, and a separate 5-gram sweep on the best variant
-for the headline WER. The 5-gram-optimal `(acoustic_scale, blank_penalty)`
-differs from 3-gram (cffan reports `ac=0.5, bp=log(7)` for 5-gram vs
-speechBCI's `ac=0.8, bp=log(2)` for 3-gram), so re-tuning is required
-rather than reusing the 3-gram-best parameters.
+**Sanity check (A@150):** A at 150 epochs reaches 20.48% PER — 0.73pp behind E — confirming
+the gain is from the objective, not training time.
 
----
-
-## Notes on Fair Comparison
-
-The project contribution is the **acoustic-model objective** (skip-diphone
-auxiliary supervision + temporal smoothness regularization), measured by
-**PER**. WER is reported as a downstream check using the standard
-speechBCI/DCoND-style WFST + optional n-best rescoring pipeline.
-
-For fair A/B/C/D/E comparison, all variants must be decoded with the
-**same** `(acoustic_scale, blank_penalty, log_priors, lm)` settings. The
-recommended workflow is to run `scripts/wer_sweep.py` once on the best
-variant to find the optimal `(acoustic_scale, blank_penalty)`, then decode
-every variant with that fixed pair. See `Methodology` for the
-checkpoint-selection protocol.
+**Summary:** The acoustic-model claim (PER A→E −0.73pp) is supported. The WER claim is not
+supported under WFST-only decoding: A wins 5-gram WER and C λ=0.005 wins 3-gram WER. Closing
+this gap likely requires GPT-2 n-best rescoring (the missing half of the DCoND pipeline), a
+diphone-aware decoder that avoids marginalization, or a modified skip-diphone head that preserves
+blank/phone temporal calibration.
 
 ---
 
