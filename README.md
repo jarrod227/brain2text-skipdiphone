@@ -1,10 +1,35 @@
 # Brain-to-Text: Skip-Diphone Auxiliary Supervision and Temporal Smoothness Regularization
 
-Course project extending [DCoND](https://arxiv.org/abs/2411.10657) with:
-(i) a **skip-diphone auxiliary head** (`z_{t-2} → z_t`), and
-(ii) a **temporal smoothness loss** on marginalized phoneme probabilities.
+A controlled ablation study on the **Brain-to-Text '24** intracortical speech BCI
+benchmark. I extend the [DCoND](https://arxiv.org/abs/2411.10657) diphone decoder
+with two acoustic-model objectives — a **skip-diphone auxiliary head** (`z_{t-2} → z_t`)
+and a **temporal smoothness loss** — and run a full PER/WER ablation with a
+leakage-free dev-split protocol and a matched-budget sanity check.
 
-See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation plan.
+**TL;DR.** The skip-diphone objective improves phoneme accuracy (**PER −0.73 pp** vs. the
+monophone baseline, from 20.48% → 19.75%), but that gain **does not transfer to word
+error rate** under WFST-only decoding. This report treats that negative result as the
+finding: I isolate *where* PER and WER diverge and give a testable hypothesis for why
+(a blank/phone temporal-alignment effect the WFST decoder is sensitive to — stated as a
+hypothesis, not a proven mechanism; see [§WER observations](#wer-observations)).
+
+| Variant | Core setting | Test PER | 3-gram WER | 5-gram WER |
+|---------|--------------|---------:|-----------:|-----------:|
+| A | Monophone CTC baseline | 20.48% | 19.00%† | **18.07%** |
+| B | Diphone (DCoND) | 20.41% | 19.23% | — |
+| C | B + smoothness | 20.45% | **19.01%** | — |
+| D | B + skip-diphone | 20.12% | 20.14% | — |
+| **E** | **Full model (skip + smooth)** | **19.75%** | 19.31% | 18.56% |
+
+<p align="center">
+  <img src="experiments/training_curves.png" width="49%" alt="Dev CTC loss and PER curves per variant"/>
+  <img src="experiments/wer_heatmap.png" width="49%" alt="Variant E WER heatmap over acoustic_scale x blank_penalty"/>
+</p>
+
+> Left: dev CTC loss / PER per variant (E reaches the lowest dev PER). Right: Variant E
+> 5-gram WER over the `(acoustic_scale, blank_penalty)` sweep. Full analysis in
+> [Results](#results); write-up in [docs/report.pdf](docs/report.pdf); motivation and
+> evaluation plan in [docs/proposal.pdf](docs/proposal.pdf).
 
 ---
 
@@ -28,6 +53,31 @@ See [docs/proposal.pdf](docs/proposal.pdf) for full motivation and evaluation pl
   `competitionData.tar.gz`, converting to `competitionData.pkl`, and
   extracting `languageModel.tar.gz` (3-gram) or `languageModel_5gram.tar.gz`
   (optional, ≥32 GB RAM if `G_no_prune.fst` is kept).
+
+---
+
+## Tests & reproducibility
+
+Unit tests cover the numerically load-bearing pieces — they need only
+`torch`/`numpy` (no data, no LM), and run in ~1 s:
+
+```bash
+pip install pytest
+pytest tests/ -q
+```
+
+- `test_loss.py` — smoothness loss: zero on constant posteriors, exact on a
+  hand-computed case, invariant to padded frames.
+- `test_model.py` — forward-pass smoke test + output-shape contract; diphone→phone
+  marginalization (both the in-training sum and the WER-path `logsumexp`) stays a
+  normalized distribution.
+- `test_dataset.py` — adjacent-diphone / skip-diphone target construction, 1-indexed
+  phoneme decoding, and collate padding/masking.
+
+**Regenerating the tables and figures:** `notebooks/results.ipynb` reads the per-run
+JSON summaries under `experiments/` and rebuilds the ablation table, the β/λ sweeps,
+and the WER heatmap (the PNGs embedded above), so every reported number traces back to
+a saved run rather than a hand-copied value.
 
 ---
 
@@ -242,10 +292,16 @@ the other diphone variants.
 
 **Skip-diphone (D) hurts WER substantially despite helping PER.**
 All four D variants land at 20.05–20.41% 3-gram WER — 0.8–1.2pp worse than B (19.23%) — even
-though D β=0.1/0.2 have *better* PER than B. The skip-diphone auxiliary loss encourages
-longer-range context in the encoder, which helps phone discrimination but disrupts the blank/phone
-temporal calibration the WFST relies on. This is **not** a marginalization artefact: B/C use the
-same marginalization without the WER regression.
+though D β=0.1/0.2 have *better* PER than B. **Observation:** the skip-diphone head raises PER-level
+accuracy but lowers WER. **Hypothesis:** because PER is read from a per-frame `argmax` while the
+WFST decoder relies on *when* the blank/phone posterior spikes to place word boundaries, the skip
+head's longer-range context may smear that temporal structure without hurting the frame-wise argmax.
+This is *consistent with* — but not proven by — the data: what I can rule out is that it is a pure
+marginalization artefact, since B/C use the same marginalization without the WER regression. It is
+**not** ruled out that the cause is a calibration mismatch or under-tuned `(acoustic_scale,
+blank_penalty)` rather than temporal alignment per se. Distinguishing these would require a direct
+alignment measurement (blank-spike sharpness / forced-alignment entropy, or a temperature-rescaled
+re-decode) — see [§Future work / limitations](#limitations).
 
 **Smoothness (C) actually *helps* 3-gram WER.**
 C λ=0.005 attains the best 3-gram WER overall (19.01%); all three C variants beat B's 19.23%.
@@ -272,6 +328,23 @@ supported under WFST-only decoding: A wins 5-gram WER and C λ=0.005 wins 3-gram
 this gap likely requires GPT-2 n-best rescoring (the missing half of the DCoND pipeline), a
 diphone-aware decoder that avoids marginalization, or a modified skip-diphone head that preserves
 blank/phone temporal calibration.
+
+---
+
+## Limitations
+
+- **The temporal-alignment explanation is a hypothesis, not a measurement.** The PER↑/WER↓
+  divergence for the skip-diphone variants is consistent with the skip head disrupting
+  blank/phone temporal structure, but this project does not measure alignment directly. Competing
+  explanations — a calibration/entropy mismatch, or an under-resolved `(acoustic_scale,
+  blank_penalty)` grid — are not fully ruled out. A direct test would compare blank-spike
+  sharpness or CTC forced-alignment entropy between the skip and non-skip variants, and check
+  whether a temperature-rescaled re-decode of the skip posteriors recovers the WER gap.
+- **WFST-only decoding.** WER omits the GPT-2 n-best rescoring stage of the DCoND pipeline
+  (supported in `src/rescore.py` but not evaluated here), so absolute WER is above the full
+  pipeline and the acoustic-model comparison is the intended read.
+- **Single participant / single benchmark.** Results are on the Brain-to-Text '24 data (participant
+  T12); generalization across participants is out of scope.
 
 ---
 

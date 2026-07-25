@@ -344,10 +344,16 @@ observations characterize the PER--WER gap:
 
 \textbf{1. Skip-diphone hurts WER.}  All four D variants land at
 20.05--20.41\% 3-gram WER, roughly 0.8--1.2 pp worse than B (19.23\%),
-despite D having better PER.  The skip-diphone auxiliary loss encourages
-the encoder to encode longer-range context, which improves phone
-discrimination but disrupts the blank/phone temporal alignment that the
-WFST decoder relies on.
+despite D having better PER.  We \emph{hypothesize} that the skip-diphone
+auxiliary loss pushes the encoder to encode longer-range context, which
+improves the per-frame phone \texttt{argmax} that PER measures but smears
+the blank/phone temporal structure that the WFST decoder relies on to place
+boundaries.  This is consistent with the data but not directly established:
+we can rule out a pure marginalization artefact (B/C share the same
+marginalization without the regression), but not a calibration mismatch or
+an under-resolved $(ac, bp)$ grid.  A direct test---comparing blank-spike
+sharpness or forced-alignment entropy across variants, or re-decoding
+temperature-rescaled skip posteriors---is left to future work.
 
 \textbf{2. Smoothness helps WER.}  Variant C ($\lambda=0.005$) attains
 the best 3-gram WER overall (19.01\%), beating B by 0.22 pp.  Temporally
@@ -383,9 +389,10 @@ confirms that this gain reflects the objective, not training time.
 Honest analysis reveals that PER improvements do not transfer to WER under
 WFST-only decoding: the monophone baseline (A) retains the best 5-gram WER
 (18.07\%), and smoothness-only (C) wins 3-gram WER (19.01\%).  The
-responsible mechanism is a calibration mismatch introduced by diphone
-marginalization, compounded by the skip-diphone head's disruption of
-blank/phone temporal alignment.
+most likely mechanism is a calibration mismatch introduced by diphone
+marginalization; we further hypothesize a contribution from the skip-diphone
+head perturbing blank/phone temporal structure, though this is not directly
+measured here and remains to be tested.
 
 Future work should explore (i) GPT-2 n-best rescoring as in DCoND, which
 is complementary to our acoustic objective and may recover the WER gap;

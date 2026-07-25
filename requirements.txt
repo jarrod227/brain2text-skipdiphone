@@ -11,3 +11,4 @@ pyyaml>=6.0
 matplotlib>=3.7.0
 pandas>=2.0.0
 transformers>=4.40.0   # GPT-2 rescoring (rescore.py); install in lm_decode env
+pytest>=7.0.0          # unit tests (tests/); dev-only
