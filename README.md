@@ -6,7 +6,7 @@ with two acoustic-model objectives — a **skip-diphone auxiliary head** (`z_{t-
 and a **temporal smoothness loss** — and run a full PER/WER ablation with a
 leakage-free dev-split protocol and a matched-budget sanity check.
 
-**TL;DR.** The skip-diphone objective improves phoneme accuracy (**PER −0.73 pp** vs. the
+The skip-diphone objective improves phoneme accuracy (**PER −0.73 pp** vs. the
 monophone baseline, from 20.48% → 19.75%), but that gain **does not transfer to word
 error rate** under WFST-only decoding. This report treats that negative result as the
 finding: I isolate *where* PER and WER diverge and give a testable hypothesis for why
