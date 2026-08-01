@@ -355,9 +355,14 @@ an under-resolved $(ac, bp)$ grid.  A direct test---comparing blank-spike
 sharpness or forced-alignment entropy across variants, or re-decoding
 temperature-rescaled skip posteriors---is left to future work.
 
-\textbf{2. Smoothness helps WER.}  Variant C ($\lambda=0.005$) attains
-the best 3-gram WER overall (19.01\%), beating B by 0.22 pp.  Temporally
-smoother phone posteriors appear to produce cleaner CTC lattices.
+\textbf{2. Smoothness helps WER among the diphone variants.}  Variant C
+($\lambda=0.005$) attains the best 3-gram WER of any diphone variant
+(19.01\%), beating B by 0.22 pp.  It does not, however, beat the monophone
+baseline: A measured 19.00\%, and since A's sweep used a narrower grid whose
+blank-penalty curve was still declining, that figure is an \emph{upper bound}
+on A's 3-gram minimum.  A and C are therefore not separated by this
+experiment.  Temporally smoother phone posteriors do appear to produce
+cleaner CTC lattices relative to the unsmoothed diphone model.
 
 \textbf{3. Calibration mismatch.}  Diphone marginalization (log-sum-exp
 over 40 contexts) yields a softer, higher-entropy phone distribution than
@@ -388,7 +393,9 @@ confirms that this gain reflects the objective, not training time.
 
 Honest analysis reveals that PER improvements do not transfer to WER under
 WFST-only decoding: the monophone baseline (A) retains the best 5-gram WER
-(18.07\%), and smoothness-only (C) wins 3-gram WER (19.01\%).  The
+outright (18.07\% vs.\ E's 18.56\%) and is at least tied with the best diphone
+variant on 3-gram (A $\leq$19.00\% vs.\ C's 19.01\%), with smoothness-only (C)
+the strongest of the diphone variants there.  The
 most likely mechanism is a calibration mismatch introduced by diphone
 marginalization; we further hypothesize a contribution from the skip-diphone
 head perturbing blank/phone temporal structure, though this is not directly
