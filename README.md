@@ -17,9 +17,14 @@ hypothesis, not a proven mechanism; see [§WER observations](#wer-observations))
 |---------|--------------|---------:|-----------:|-----------:|
 | A | Monophone CTC baseline | 20.48% | 19.00%† | **18.07%** |
 | B | Diphone (DCoND) | 20.41% | 19.23% | — |
-| C | B + smoothness | 20.45% | **19.01%** | — |
+| C | B + smoothness | 20.45% | 19.01% | — |
 | D | B + skip-diphone | 20.12% | 20.14% | — |
 | **E** | **Full model (skip + smooth)** | **19.75%** | 19.31% | 18.56% |
+
+† A's 3-gram sweep used a narrower grid whose blank-penalty curve was still declining, so 19.00%
+is an *upper bound* on A's 3-gram minimum — A is at least as good as C there. The baseline wins
+5-gram WER outright; **the acoustic-model gain does not survive decoding**, which is the point of
+the analysis below.
 
 <p align="center">
   <img src="experiments/training_curves.png" width="49%" alt="Dev CTC loss and PER curves per variant"/>
@@ -277,7 +282,7 @@ WER uses WFST decoding with per-variant optimal `(acoustic_scale, blank_penalty)
 | 4= | C | Diphone + smoothness, λ=0.001 | 20.36% | 19.05% | — |
 | 4= | C | Diphone + smoothness, λ=0.01 | 20.36% | 19.21% | — |
 | 7 | B | Diphone baseline | 20.41% | 19.23% | — |
-| 8 | C | Diphone + smoothness, λ=0.005 | 20.45% | **19.01%** | — |
+| 8 | C | Diphone + smoothness, λ=0.005 | 20.45% | 19.01% | — |
 | 9 | D | Skip-diphone, β=0.3 | 20.47% | 20.41% | — |
 | 10 | A | Monophone CTC baseline (150 ep) | 20.48% | 19.00%† | **18.07%** |
 
@@ -303,9 +308,13 @@ blank_penalty)` rather than temporal alignment per se. Distinguishing these woul
 alignment measurement (blank-spike sharpness / forced-alignment entropy, or a temperature-rescaled
 re-decode) — see [§Future work / limitations](#limitations).
 
-**Smoothness (C) actually *helps* 3-gram WER.**
-C λ=0.005 attains the best 3-gram WER overall (19.01%); all three C variants beat B's 19.23%.
-Temporally smooth phone posteriors appear to make the lattice cleaner for the WFST.
+**Smoothness (C) actually *helps* 3-gram WER — among the diphone variants.**
+C λ=0.005 attains the best 3-gram WER of any diphone variant (19.01%), and all three C variants
+beat B's 19.23%. It does **not** beat the monophone baseline: A measured 19.00%, and because
+A's sweep used a narrower grid whose bp curve was still declining, 19.00% is an *upper bound* on
+A's 3-gram minimum — so A is at least as good as C on 3-gram, and the two are not separated by
+this experiment. Temporally smooth phone posteriors do appear to make the lattice cleaner for
+the WFST relative to the unsmoothed diphone model.
 
 **E (= D + C) sits in between.**
 E achieves the best PER (−0.73pp vs A), but its 3-gram WER (19.31%) reflects D's regression
@@ -317,14 +326,15 @@ miscalibration costs more.
 
 **β / λ observations:**
 - D's PER optimum is β=0.2 (20.12%); its WER optimum is β=0.1 (20.05%). β=0.3 hurts both.
-- C's λ=0.005 wins WER (19.01%) despite having the worst PER among C runs (20.45%).
+- Among the C runs, λ=0.005 gives the best WER (19.01%) despite the worst PER (20.45%).
 - E improves PER over B by 0.66pp but worsens 3-gram WER by 0.08pp.
 
 **Sanity check (A@150):** A at 150 epochs reaches 20.48% PER — 0.73pp behind E — confirming
 the gain is from the objective, not training time.
 
 **Summary:** The acoustic-model claim (PER A→E −0.73pp) is supported. The WER claim is not
-supported under WFST-only decoding: A wins 5-gram WER and C λ=0.005 wins 3-gram WER. Closing
+supported under WFST-only decoding: A wins 5-gram WER outright (18.07% vs E's 18.56%) and is at
+least tied with the best diphone variant on 3-gram (A ≤19.00% vs C's 19.01%). Closing
 this gap likely requires GPT-2 n-best rescoring (the missing half of the DCoND pipeline), a
 diphone-aware decoder that avoids marginalization, or a modified skip-diphone head that preserves
 blank/phone temporal calibration.
