@@ -79,6 +79,35 @@ data/
     └── lexicon_numbers.txt
 ```
 
+## Converted pkl structure
+
+`competitionData.pkl` is a single dict of splits, each holding one entry per
+recording day:
+
+```
+{'train':       [day_0, ..., day_23],   # 24 days
+ 'test':        [day_0, ..., day_23],   # 24 days
+ 'competition': [day_0, ..., day_14]}   # 15 days, no labels
+```
+
+Each day is a dict of five trial-aligned fields — index `i` selects the same
+sentence across all of them:
+
+| Field | Type / shape | Contents |
+|-------|--------------|----------|
+| `sentenceDat` | list of `(T, 256)` float arrays | neural features (T varies per trial) |
+| `phonemes` | `(N, 500)` int | phoneme ids, **1-indexed**, zero-padded |
+| `phoneLens` | `(N,)` int | true phoneme count per trial |
+| `timeSeriesLens` | `(N,)` int | true frame count per trial |
+| `transcriptions` | list of `str` | reference sentence |
+
+Three things to watch, all handled in `src/dataset.py`:
+
+- `phonemes` is **1-indexed** (the converter adds 1 so 0 can serve as padding);
+  subtract 1 to get the 0–39 targets the model expects.
+- The `500` width of `phonemes` is padding — slice with `phoneLens`.
+- `sentenceDat[i]` may carry trailing padding rows — slice with `timeSeriesLens`.
+
 ## Neural features
 
 Each trial provides:
