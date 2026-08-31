@@ -90,16 +90,26 @@ recording day:
  'competition': [day_0, ..., day_14]}   # 15 days, no labels
 ```
 
-Each day is a dict of five trial-aligned fields — index `i` selects the same
-sentence across all of them:
+Each day is a dict of five parallel fields, all indexed by the same trial
+index `i` — that is, `i` picks one sentence, and the five fields hold that
+sentence's neural data, phonemes, lengths, and text.
+
+Throughout: **`N`** = number of sentences recorded that day, **`T`** = number
+of 20 ms frames in one sentence (varies from sentence to sentence).
 
 | Field | Type / shape | Contents |
 |-------|--------------|----------|
-| `sentenceDat` | list of `(T, 256)` float arrays | neural features (T varies per trial) |
-| `phonemes` | `(N, 500)` int | phoneme ids, **1-indexed**, zero-padded |
-| `phoneLens` | `(N,)` int | true phoneme count per trial |
-| `timeSeriesLens` | `(N,)` int | true frame count per trial |
-| `transcriptions` | list of `str` | reference sentence |
+| `sentenceDat` | **list** of `N` arrays, each `(T, 256)` float | neural features |
+| `phonemes` | 2-D array `(N, 500)` int | phoneme ids, **1-indexed**, zero-padded |
+| `phoneLens` | 1-D array `(N,)` int | true phoneme count per sentence |
+| `timeSeriesLens` | 1-D array `(N,)` int | true frame count per sentence |
+| `transcriptions` | **list** of `N` `str` | reference sentence |
+
+Note that `sentenceDat` is a Python list, not a 2-D array: `T` differs per
+sentence, so the per-sentence arrays cannot be stacked into one rectangle.
+`phonemes` *can* be, because it is zero-padded to a fixed width of 500. So
+`len(day["sentenceDat"])` gives `N` (the sentence count), while
+`day["sentenceDat"][i]` is the `(T, 256)` array for one sentence.
 
 Three things to watch, all handled in `src/dataset.py`:
 
